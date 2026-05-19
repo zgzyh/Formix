@@ -842,7 +842,7 @@ class MainWindow(QMainWindow):
             else:
                 self.settings_page.set_daily_status(self._tr("daily_api_saved_disabled"))
         else:
-            self.settings_page.set_daily_status(self._tr("daily_api_missing_custom"))
+            self.settings_page.set_daily_status(self._tr("daily_api_builtin_enabled"))
 
     def _on_daily_refresh_days_changed(self, refresh_days):
         self._daily_wp_refresh_days = self._normalize_daily_refresh_days(refresh_days)

@@ -737,6 +737,14 @@ class SettingsPage(QWidget):
         if not hasattr(self, "daily_api_edit"):
             return ""
         value = self.daily_api_edit.text().strip()
+        if not value:
+            self._daily_api_url = ""
+            self.daily_api_edit.blockSignals(True)
+            self.daily_api_edit.clear()
+            self.daily_api_edit.blockSignals(False)
+            self._refresh_daily_controls_visibility()
+            self.daily_wallpaper_api_changed.emit("")
+            return ""
 
         normalized, err = normalize_custom_api_url(value)
         if value and err:
@@ -780,8 +788,7 @@ class SettingsPage(QWidget):
             self.daily_refresh_btn.setText(tr(self._language, "daily_refresh"))
 
     def _refresh_daily_controls_visibility(self):
-        has_api = bool(self._daily_api_url.strip())
-        visible = bool(self._daily_enabled and has_api)
+        visible = bool(self._daily_enabled)
         if hasattr(self, "_daily_refresh_days_wrap"):
             self._daily_refresh_days_wrap.setVisible(visible)
 

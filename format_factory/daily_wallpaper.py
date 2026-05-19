@@ -70,7 +70,7 @@ def normalize_custom_api_url(value: str) -> tuple[str, str]:
 
 def _normalize_api_url(value: str) -> str:
     normalized, _ = normalize_custom_api_url(value)
-    return normalized
+    return normalized or _API_URL
 
 
 def _normalize_refresh_days(value):
