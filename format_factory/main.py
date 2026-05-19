@@ -1,7 +1,6 @@
 ﻿# format_factory/main.py
 import sys
 import os
-import colorsys
 import json
 import re as _re
 import platform
@@ -14,7 +13,6 @@ from PyQt6.QtWidgets import (
     QTextBrowser, QCheckBox, QHBoxLayout
 )
 from PyQt6.QtCore import Qt, QTimer, QSettings
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QImage
 
 from format_factory.config import (
     APP_VERSION, UPDATE_CACHE_DIR, FFMPEG_CACHE_DIR, FFMPEG_DIR,
@@ -22,28 +20,23 @@ from format_factory.config import (
 )
 from format_factory.i18n import resolve_language, tr, LANG_AUTO
 from format_factory.ffmpeg_handler import FFmpegHandler
-from format_factory.gui_pages.settings_page import (
+from format_factory.gui.settings_page import (
     SettingsPage, GPU_ENCODERS
 )
-from format_factory.gui_pages.video_converter import VideoConverterPage
-from format_factory.gui_pages.audio_converter import AudioConverterPage
-from format_factory.gui_pages.image_converter import ImageConverterPage
-from format_factory.gui_pages.m3u8_downloader import M3U8DownloaderPage
-from format_factory.gui_pages.av_splitter_page import AVSplitterPage
-from format_factory.gui_pages.command_converter import CommandConverterPage
+from format_factory.gui.video_converter import VideoConverterPage
+from format_factory.gui.audio_converter import AudioConverterPage
+from format_factory.gui.image_converter import ImageConverterPage
+from format_factory.gui.m3u8_downloader import M3U8DownloaderPage
+from format_factory.gui.av_splitter_page import AVSplitterPage
+from format_factory.gui.command_converter import CommandConverterPage
 from format_factory.theme import build_stylesheet, LIGHT_THEME, DARK_THEME
 from format_factory.daily_wallpaper import DailyWallpaperService
+from format_factory.gui.bg_widget import BackgroundWidget, analyze_image_colors
+from format_factory.gpu import apply_gpu_args
 from format_factory.updater import (
     UpdaterService, UpdateDownloaderThread, FFmpegDownloadThread, _parse_version,
     replace_app_with_archive,
 )
-
-# CPU codec → GPU role mapping
-_CPU_TO_ROLE = {
-    "libx264": "h264", "libx265": "hevc",
-    "libxvid": "h264", "flv1": "h264",
-}
-
 
 def _as_bool(value) -> bool:
     if isinstance(value, bool):
@@ -102,332 +95,6 @@ def _detect_system_theme() -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-#  Average-color analyser  (pure Qt, no PIL)
-# ══════════════════════════════════════════════════════════════════
-def analyze_image_colors(path: str) -> dict:
-    """
-    计算图片的平均颜色（取代原来的主色调计算）。
-    返回平均颜色的色相、RGB，以及其互补色。
-    """
-    empty = {"is_dark": False, "complement_hex": "",
-             "accent_hex": "", "avg_hue": -1.0,
-             "avg_r": 128, "avg_g": 128, "avg_b": 128}
-    if not path or not os.path.isfile(path):
-        return empty
-
-    img = QImage(path)
-    if img.isNull():
-        return empty
-
-    small = img.scaled(60, 60,
-                       Qt.AspectRatioMode.IgnoreAspectRatio,
-                       Qt.TransformationMode.SmoothTransformation)
-
-    rt = gt = bt = n = 0
-
-    for y in range(small.height()):
-        for x in range(small.width()):
-            c = QColor(small.pixel(x, y))
-            rt += c.red(); gt += c.green(); bt += c.blue()
-            n += 1
-
-    if n == 0:
-        return empty
-
-    ar, ag, ab_ = rt//n, gt//n, bt//n
-    bright   = (ar*299 + ag*587 + ab_*114) / 1000
-    is_dark  = bright < 128
-
-    # 计算平均颜色的 HSV
-    h, s, _ = colorsys.rgb_to_hsv(ar/255, ag/255, ab_/255)
-
-    # 如果饱和度极低（黑白灰图片），色相无效
-    avg_hue = h if s > 0.05 else -1.0
-
-    # 计算互补色（色相相差 180 度即 0.5）
-    comp_hue = (h + 0.5) % 1.0
-
-    if is_dark:
-        cc = QColor.fromHsvF(comp_hue, 0.55, 0.94)
-        ac = QColor.fromHsvF((comp_hue+0.08)%1.0, 0.75, 0.98)
-    else:
-        cc = QColor.fromHsvF(comp_hue, 0.65, 0.38)
-        ac = QColor.fromHsvF((comp_hue+0.08)%1.0, 0.80, 0.50)
-
-    return {"is_dark": is_dark,
-            "complement_hex": cc.name(),
-            "accent_hex": ac.name(),
-            "avg_hue": avg_hue,
-            "avg_bright": bright,
-            "avg_r": ar, "avg_g": ag, "avg_b": ab_}
-
-
-# ══════════════════════════════════════════════════════════════════
-#  Background widget
-# ══════════════════════════════════════════════════════════════════
-class BackgroundWidget(QWidget):
-    """
-    用 paintEvent 直接绘制三层，彻底解决 QLabel 叠加时 alpha 不穿透的问题：
-      1. 清晰背景图
-      2. 高斯模糊层（离屏渲染到 QPixmap，叠加在背景上）
-      3. 纯色半透明遮罩（覆盖在图片上方）
-    """
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._pixmap     = None
-        self._bg_cache   = None    # (w, h) → QPixmap
-        self._blur_cache = None    # (w, h, r) → QPixmap
-        self._fill_mode  = "cover"
-        self._dark          = False
-        self._blur_r        = 0
-        self._bg_opacity     = 50
-        self._mask_alpha     = 26
-        self._avg_bright    = 128
-        self._avg_r = self._avg_g = self._avg_b = 128
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
-
-    # ── 公开接口 ──────────────────────────────────────────────────────
-    def set_image(self, path: str):
-        self._pixmap     = QPixmap(path) if (path and os.path.isfile(path)) else None
-        self._bg_cache   = None
-        self._blur_cache = None
-        self.update()
-
-    def set_fill_mode(self, mode: str):
-        mode = mode if mode in {"stretch", "none", "fit", "cover"} else "cover"
-        if mode != self._fill_mode:
-            self._fill_mode = mode
-            self._bg_cache = None
-            self._blur_cache = None
-        self.update()
-
-    def set_blur(self, level: int):
-        new_r = max(0, int(level))
-        if new_r != self._blur_r:
-            self._blur_r    = new_r
-            self._blur_cache = None
-        self.update()
-
-    def set_bg_opacity(self, pct: int):
-        self._bg_opacity = max(0, min(100, int(pct)))
-        self.update()
-
-    def set_dark(self, dark: bool):
-        self._dark = dark
-        self.update()
-
-    def set_mask_alpha(self, alpha: int):
-        self._mask_alpha = max(0, min(255, int(alpha)))
-        self.update()
-
-    def set_mask_color(self, dark: bool):
-        self._dark = dark
-        self.update()
-
-    def set_bg_colors(self, colors: dict):
-        self._avg_bright = colors.get("avg_bright", 128)
-        self._avg_r      = colors.get("avg_r", 128)
-        self._avg_g      = colors.get("avg_g", 128)
-        self._avg_b      = colors.get("avg_b", 128)
-        self.update()
-
-    # ── 离屏高斯模糊 ──────────────────────────────────────────────────
-    @staticmethod
-    def _offscreen_blur(src: "QPixmap", sigma: float) -> "QPixmap":
-        from PyQt6.QtWidgets import QGraphicsScene, QGraphicsPixmapItem, QGraphicsBlurEffect
-        from PyQt6.QtCore import QRectF
-
-        w, h   = src.width(), src.height()
-        pad    = int(sigma * 3) + 2
-        pw, ph = w + pad * 2, h + pad * 2
-
-        scene = QGraphicsScene()
-        scene.setSceneRect(QRectF(0, 0, pw, ph))
-
-        item = QGraphicsPixmapItem(src)
-        item.setPos(pad, pad)
-        scene.addItem(item)
-
-        fx = QGraphicsBlurEffect()
-        fx.setBlurRadius(sigma)
-        fx.setBlurHints(QGraphicsBlurEffect.BlurHint.QualityHint)
-        item.setGraphicsEffect(fx)
-
-        padded = QPixmap(pw, ph)
-        padded.fill(Qt.GlobalColor.transparent)
-        p = QPainter(padded)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        scene.render(p)
-        p.end()
-
-        return padded.copy(pad, pad, w, h)
-
-    # ── 内部 ──────────────────────────────────────────────────────────
-    def _bg_alpha(self) -> float:
-        return max(0.0, min(1.0, self._bg_opacity / 100.0))
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self._bg_cache   = None
-        self._blur_cache = None
-        self.update()
-
-    def _render_base_pixmap(self, w: int, h: int) -> QPixmap:
-        if not self._pixmap:
-            return QPixmap()
-
-        pix = QPixmap(w, h)
-        pix.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pix)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-
-        if self._fill_mode == "stretch":
-            scaled = self._pixmap.scaled(
-                w, h,
-                Qt.AspectRatioMode.IgnoreAspectRatio,
-                Qt.TransformationMode.SmoothTransformation)
-            p.drawPixmap(0, 0, scaled)
-        elif self._fill_mode == "none":
-            x = (w - self._pixmap.width()) // 2
-            y = (h - self._pixmap.height()) // 2
-            p.drawPixmap(x, y, self._pixmap)
-        elif self._fill_mode == "fit":
-            scaled = self._pixmap.scaled(
-                w, h,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation)
-            x = (w - scaled.width()) // 2
-            y = (h - scaled.height()) // 2
-            p.drawPixmap(x, y, scaled)
-        else:
-            scaled = self._pixmap.scaled(
-                w, h,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation)
-            x = (scaled.width() - w) // 2
-            y = (scaled.height() - h) // 2
-            p.drawPixmap(-x, -y, scaled)
-
-        p.end()
-        return pix
-
-    def paintEvent(self, e):
-        if not self._pixmap:
-            return
-
-        w, h = self.width(), self.height()
-        if w <= 0 or h <= 0:
-            return
-
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-
-        # ── 层 1：清晰背景 ────────────────────────────────────────────
-        bg_key = (w, h, self._fill_mode)
-        if self._bg_cache is None or self._bg_cache[0] != bg_key:
-            pix = self._render_base_pixmap(w, h)
-            self._bg_cache   = (bg_key, pix)
-            self._blur_cache = None
-
-        bg_alpha = self._bg_alpha()
-        if bg_alpha > 0:
-            painter.setOpacity(bg_alpha)
-            painter.drawPixmap(0, 0, self._bg_cache[1])
-            painter.setOpacity(1.0)
-
-        # ── 层 2：高斯模糊（blur_r > 0 时才叠加） ────────────────────
-        if self._blur_r > 0 and bg_alpha > 0:
-            blur_key = (w, h, self._blur_r, self._fill_mode)
-            if self._blur_cache is None or self._blur_cache[0] != blur_key:
-                blurred = self._offscreen_blur(
-                    self._bg_cache[1], sigma=float(self._blur_r))
-                self._blur_cache = (blur_key, blurred)
-            painter.setOpacity(bg_alpha)
-            painter.drawPixmap(0, 0, self._blur_cache[1])
-            painter.setOpacity(1.0)
-
-        # ── 层 3：纯色遮罩，始终绘制在图片上方 ───────────────────────
-        mask_color = QColor(0, 0, 0, self._mask_alpha) if self._dark else QColor(255, 255, 255, self._mask_alpha)
-        painter.fillRect(0, 0, w, h, mask_color)
-
-        painter.end()
-
-
-# ══════════════════════════════════════════════════════════════════
-#  GPU arg injection  (no detection, purely table-driven)
-# ══════════════════════════════════════════════════════════════════
-def apply_gpu_args(base_args: list, vendor: str, output_fmt: str) -> tuple:
-    """
-    Replace CPU codec args with GPU equivalents based on chosen vendor.
-    Returns (final_args, fallback_reason).
-    fallback_reason is "" when GPU is used, or a description when CPU fallback occurs.
-    """
-    if vendor == "none" or output_fmt == "gif":
-        return base_args, ""
-
-    enc = GPU_ENCODERS.get(vendor, {})
-    if not enc.get("h264"):
-        return base_args, ""
-
-    supported = enc.get("supported_roles", {"h264", "hevc"})
-
-    result   = list(base_args)
-    replaced = False
-    i = 0
-    while i < len(result):
-        if result[i] in ("-c:v", "-vcodec") and i+1 < len(result):
-            role = _CPU_TO_ROLE.get(result[i+1])
-            if role is None:
-                # e.g. libvpx-vp9 / prores — GPU cannot encode this
-                return base_args, f"编码器 {result[i+1]} 不支持 GPU 加速，已自动使用 CPU"
-            if role not in supported:
-                return base_args, f"当前 GPU 不支持 {role.upper()} 编码，已自动使用 CPU"
-            gpu_codec = enc.get(role)
-            if gpu_codec:
-                result[i+1] = gpu_codec
-                replaced = True
-                i += 2; continue
-        i += 1
-
-    if not replaced:
-        # No explicit -c:v; inject at front if there are quality flags
-        if any(a in base_args for a in ("-preset", "-crf", "-q:v")):
-            if "h264" in supported:
-                result = ["-c:v", enc["h264"]] + result
-                replaced = True
-
-    if replaced and enc.get("extra"):
-        for j, tok in enumerate(result):
-            if tok in ("-c:v", "-vcodec") and j+1 < len(result):
-                result = result[:j+2] + enc["extra"] + result[j+2:]
-                break
-
-    # GPU encoders need vendor-specific quality controls; strip CPU-centric
-    # knobs that commonly make NVENC/AMF/QSV invocations invalid.
-    if replaced:
-        filtered = []
-        k = 0
-        while k < len(result):
-            tok = result[k]
-            if tok in {"-preset", "-crf"} and k + 1 < len(result):
-                k += 2
-                continue
-            if tok == "-q:v" and k + 1 < len(result):
-                k += 2
-                continue
-            filtered.append(tok)
-            k += 1
-        result = filtered
-
-    # GPU encoders (nvenc/amf/qsv) only accept YUV420P.
-    if replaced and "-pix_fmt" not in result:
-        result = result + ["-pix_fmt", "yuv420p"]
-
-    return result, ""
-
-
-# ══════════════════════════════════════════════════════════════════
 #  Main Window
 # ══════════════════════════════════════════════════════════════════
 class MainWindow(QMainWindow):
@@ -454,7 +121,7 @@ class MainWindow(QMainWindow):
         self._s              = QSettings("Formix", "App")
         self._theme_name     = self._s.value("theme",         "light")
         self._system_theme_name = _detect_system_theme()
-        self._blur_level     = int(self._s.value("blur",      0))
+        self._blur_level     = max(0, min(50, int(self._s.value("blur", 0))))
         self._bg_opacity     = int(self._s.value("mask_opacity", 50))
         self._bg_path        = self._s.value("bg_path",       "")
         self._user_bg_path   = self._s.value("user_bg_path",  "")  # 用户手动选择的背景
@@ -470,11 +137,13 @@ class MainWindow(QMainWindow):
             self._s.value("daily_wp_refresh_days", 1)
         )
         self.ffmpeg_handler = FFmpegHandler()
+        self.cmd_ffmpeg_handler = FFmpegHandler()
         self._ffmpeg_ready = bool(getattr(self.ffmpeg_handler, "ffmpeg_path", ""))
 
         # Batch state
         self._batch_page    = None
         self._batch_files   = []
+        self._batch_stems   = []
         self._batch_fmt     = ""
         self._batch_dir     = ""
         self._batch_args    = []
@@ -483,6 +152,7 @@ class MainWindow(QMainWindow):
         self._batch_total   = 0
         self._batch_success = 0
         self._batch_fail    = 0
+        self._batch_queue   = []
         self.current_page   = None
 
         self._init_ui()
@@ -552,13 +222,30 @@ class MainWindow(QMainWindow):
         return datetime.now() - self._app_start_time >= timedelta(days=self._FFMPEG_UPDATE_AFTER_DAYS)
 
     def _ffmpeg_action_text(self) -> str:
-        return "更新" if self._ffmpeg_should_show_update() else "下载"
+        return "update" if self._ffmpeg_should_show_update() else "download"
 
     def _tr(self, key: str, **kwargs) -> str:
         return tr(self._language, key, **kwargs)
 
     def _localized_ffmpeg_action_label(self) -> str:
-        return self._tr("ffmpeg_update") if self._ffmpeg_action_text() == "更新" else self._tr("ffmpeg_download")
+        return self._tr("ffmpeg_update") if self._ffmpeg_action_text() == "update" else self._tr("ffmpeg_download")
+
+    def _refresh_days_label(self, value) -> str:
+        if value == "manual":
+            return self._tr("settings_never")
+        key = "settings_day_singular" if int(value) == 1 else "settings_day_plural"
+        return self._tr(key, count=int(value))
+
+    def _wallpaper_error_text(self, key: str, *, request_error_prefix: str = "daily_error_request_failed") -> str:
+        if key.startswith("url_error:"):
+            return self._tr("error_network", detail=key[10:])
+        if key == "no_api":
+            return self._tr("daily_error_no_api")
+        if key == "invalid_response":
+            return self._tr("daily_error_invalid_response")
+        if key.startswith("error:"):
+            return self._tr("daily_error_request_exception", detail=key[6:])
+        return self._tr(request_error_prefix, detail=key)
 
     def _apply_language(self):
         self._language = resolve_language(self._language_pref or LANG_AUTO)
@@ -608,7 +295,8 @@ class MainWindow(QMainWindow):
             self._apply_theme()
 
     def _refresh_ffmpeg_action_ui(self, update_status: bool = True):
-        action = self._ffmpeg_action_text()
+        action_mode = self._ffmpeg_action_text()
+        action = self._tr("action_update") if action_mode == "update" else self._tr("action_download")
         if hasattr(self, "settings_page") and self.settings_page is not None:
             self.settings_page.set_ffmpeg_action(action)
         if update_status:
@@ -648,7 +336,7 @@ class MainWindow(QMainWindow):
         self.image_page    = ImageConverterPage(ffmpeg_handler=self.ffmpeg_handler)
         self.m3u8_page     = M3U8DownloaderPage(ffmpeg_handler=self.ffmpeg_handler)
         self.av_page       = AVSplitterPage(ffmpeg_handler=self.ffmpeg_handler)
-        self.command_page  = CommandConverterPage(ffmpeg_handler=self.ffmpeg_handler)
+        self.command_page  = CommandConverterPage(ffmpeg_handler=self.cmd_ffmpeg_handler)
         self.settings_page = SettingsPage(
             current_theme  = self._theme_name,
             current_blur   = self._blur_level,
@@ -686,14 +374,17 @@ class MainWindow(QMainWindow):
     # ── Signals ─────────────────────────────────────────────────────
     def _connect_signals(self):
         for pg in (self.video_page, self.audio_page,
-                   self.image_page, self.m3u8_page, self.command_page):
+                   self.image_page, self.m3u8_page):
             pg.conversion_requested.connect(self._on_batch_start)
             pg.cancel_conversion_signal.connect(self._on_cancel)
+            pg.ffmpeg_download_prompt_requested.connect(self._prompt_download_ffmpeg)
+        self.command_page.cancel_conversion_signal.connect(self._on_cmd_cancel)
 
         # av_page：分离走 conversion_requested，合成走 merge_requested
         self.av_page.conversion_requested.connect(self._on_av_split_task)
         self.av_page.merge_requested.connect(self._on_av_merge_task)
         self.av_page.cancel_conversion_signal.connect(self._on_cancel)
+        self.av_page.ffmpeg_download_prompt_requested.connect(self._prompt_download_ffmpeg)
 
         self._connect_ffmpeg_handler_signals()
 
@@ -720,19 +411,9 @@ class MainWindow(QMainWindow):
             if pg is self.command_page and hasattr(pg, "focus_terminal"):
                 pg.focus_terminal()
 
-    def command_page_busy_reason(self, requester=None) -> str:
-        busy_page = self._active_ffmpeg_page()
-        if busy_page is None:
-            return ""
-        if requester is not None and busy_page is requester:
-            return ""
-        return "当前已有转换任务在运行，请等待完成或先取消后再执行命令。"
-
     def _active_ffmpeg_page(self):
         if self._batch_page is not None:
             return self._batch_page
-        if self.command_page is not None and getattr(self.command_page, "_active", False):
-            return self.command_page
         if self.ffmpeg_handler and self.ffmpeg_handler.is_busy():
             return self.current_page
         return None
@@ -741,7 +422,7 @@ class MainWindow(QMainWindow):
         busy_page = self._active_ffmpeg_page()
         if busy_page is not None and busy_page is not page:
             if page and hasattr(page, "log_message"):
-                page.log_message("当前已有转换任务在运行，请等待完成或先取消。", "warning")
+                page.log_message(self._tr("busy_task_running"), "warning")
             return False
         return True
 
@@ -751,25 +432,53 @@ class MainWindow(QMainWindow):
         if not pg: return
         if not self._ensure_ffmpeg_ready(pg):
             return
-        if idx == 0 and not self._ensure_handler_available(pg):
+        if idx != 0:
+            return
+        if getattr(pg, "media_type", "") == "m3u8":
+            batch_files = [inp] if inp else []
+            batch_stems = [stem] if stem else []
+        else:
+            batch_files = list(pg.input_files)
+            batch_stems = []
+        batch = (
+            pg,
+            batch_files,
+            pg.output_format_combo.currentText(),
+            pg.output_dir,
+            args,
+            batch_stems,
+        )
+        if self._batch_page is None:
+            self._start_batch(batch)
+        else:
+            self._batch_queue.append(batch)
+            pg.log_message(self._tr("task_queued"), "info")
             pg.start_conversion_button.setEnabled(True)
             pg.cancel_conversion_button.setEnabled(False)
-            return
-        if idx == 0:
-            self._batch_page  = pg
-            self._batch_files = list(pg.input_files)
-            self._batch_fmt   = pg.output_format_combo.currentText()
-            self._batch_dir   = pg.output_dir
-            self._batch_args  = args
-            self._batch_total   = len(self._batch_files)
-            self._batch_idx     = 0
-            self._batch_done    = 0
-            self._batch_success = 0
-            self._batch_fail    = 0
-            pg.overall_progress_bar.setValue(0)
-            pg.overall_progress_bar.setFormat(
-                f"总进度: (0/{self._batch_total})  0%")
-            self._submit_next()
+
+    def _start_batch(self, batch):
+        if len(batch) >= 6:
+            pg, files, fmt, dir_, args, stems = batch
+        else:
+            pg, files, fmt, dir_, args = batch
+            stems = []
+        self._batch_page  = pg
+        if hasattr(pg, "_is_busy"):
+            pg._is_busy = True
+        self._batch_files = files
+        self._batch_stems = stems
+        self._batch_fmt   = fmt
+        self._batch_dir   = dir_
+        self._batch_args  = args
+        self._batch_total   = len(files)
+        self._batch_idx     = 0
+        self._batch_done    = 0
+        self._batch_success = 0
+        self._batch_fail    = 0
+        pg.overall_progress_bar.setValue(0)
+        pg.overall_progress_bar.setFormat(
+            self._tr("progress_batch_format", done=0, total=self._batch_total, percent=0))
+        self._submit_next()
 
     def _submit_next(self):
         pg = self._batch_page
@@ -777,7 +486,11 @@ class MainWindow(QMainWindow):
             return
         i    = self._batch_idx
         inp  = self._batch_files[i]
-        stem = os.path.splitext(os.path.basename(inp))[0]
+        stem = ""
+        if i < len(self._batch_stems):
+            stem = self._batch_stems[i] or ""
+        if not stem:
+            stem = os.path.splitext(os.path.basename(inp))[0]
         self._batch_idx += 1
 
         # M3U8：m3u8 播放列表和 ts 切片统一放在 {stem}_segments 子目录
@@ -809,27 +522,36 @@ class MainWindow(QMainWindow):
         # GPU injection（基于当前 final_args，不覆盖 m3u8 里已处理的路径）
         if self._gpu_vendor != "none":
             new_args, fallback_reason = apply_gpu_args(
-                final_args, self._gpu_vendor, self._batch_fmt)
+                final_args, self._gpu_vendor, self._batch_fmt, self._language)
             if fallback_reason:
                 # GPU 不支持此预设，自动回退 CPU，记录提示
                 pg.log_ffmpeg_line(i, "warning",
-                    f"已自动切换 CPU 编码: {fallback_reason}")
+                    self._tr("log_gpu_fallback_cpu", reason=fallback_reason))
             elif new_args != final_args:
                 final_args = new_args
                 enc = GPU_ENCODERS.get(self._gpu_vendor, {})
                 pg.log_ffmpeg_line(i, "encoder",
-                    f"GPU 加速: {enc.get('h264','')}  ({enc.get('label','')})")
+                    self._tr("log_gpu_enabled", codec=enc.get("h264", ""), label=enc.get("label", "")))
             # fallback_reason 有值时 new_args == final_args，继续用 CPU 参数
 
-        pg.log_message(
-            f"[{i+1}/{self._batch_total}]  排队: "
-            f"{os.path.basename(inp)}{in_size}  →  {os.path.basename(out)}",
-            "info")
+        pg.log_message(self._tr(
+            "log_queue_item",
+            index=i + 1,
+            total=self._batch_total,
+            input=os.path.basename(inp),
+            size=in_size,
+            output=os.path.basename(out),
+        ), "info")
         self.ffmpeg_handler.convert_file(i, inp, out, final_args)
 
     def _on_cancel(self):
+        self._batch_queue.clear()
         if self.ffmpeg_handler:
             self.ffmpeg_handler.cancel_conversion()
+
+    def _on_cmd_cancel(self):
+        if self.cmd_ffmpeg_handler:
+            self.cmd_ffmpeg_handler.cancel_conversion()
 
     # ── AV Splitter / Merger ─────────────────────────────────────────
     def _on_av_split_task(self, idx: int, inp: str, args: list, stem: str):
@@ -883,12 +605,12 @@ class MainWindow(QMainWindow):
     def _on_started(self, idx, path):
         pg = self._batch_page
         if pg:
-            if pg is self.command_page:
-                pg.log_message("[1/1]  ▶ 开始执行 FFmpeg 命令", "info")
-            else:
-                pg.log_message(
-                    f"[{idx+1}/{self._batch_total}]  ▶ 开始转换: "
-                    f"{os.path.basename(path)}", "info")
+            pg.log_message(self._tr(
+                "log_batch_start_item",
+                index=idx + 1,
+                total=self._batch_total,
+                name=os.path.basename(path),
+            ), "info")
 
     def _on_progress(self, idx, msg, pct):
         pg = self._batch_page
@@ -926,10 +648,10 @@ class MainWindow(QMainWindow):
                 pg.set_progress_state("100%", "success")
         elif status == "cancelled":
             if hasattr(pg, "set_progress_state"):
-                pg.set_progress_state("已取消", "warning")
+                pg.set_progress_state(tr(self._language, "progress_cancelled"), "warning")
         elif status == "failure":
             if hasattr(pg, "set_progress_state"):
-                pg.set_progress_state("转换失败", "error")
+                pg.set_progress_state(tr(self._language, "progress_failed"), "error")
 
         self._batch_done += 1
 
@@ -940,34 +662,45 @@ class MainWindow(QMainWindow):
 
         if self._batch_done >= self._batch_total or status == "cancelled":
             if status == "cancelled":
-                pg.log_message("⏹  转换已取消", "warning")
-                self.statusBar().showMessage("已取消")
+                pg.log_message(tr(self._language, "log_conversion_cancelled"), "warning")
+                self.statusBar().showMessage(tr(self._language, "progress_cancelled"))
             else:
                 s = self._batch_success
                 f = self._batch_fail
                 t = self._batch_total
                 if f == 0:
-                    summary = f"✅  全部 {t} 个文件转换完成"
+                    summary = tr(self._language, "status_all_success", count=t)
                     pg.log_message(summary, "success")
-                    self.statusBar().showMessage("所有任务完成")
+                    self.statusBar().showMessage(tr(self._language, "status_all_success", count=t))
                 elif s == 0:
-                    summary = f"❌  {t} 个文件全部转换失败"
+                    summary = tr(self._language, "status_all_failed", count=t)
                     pg.log_message(summary, "error")
-                    self.statusBar().showMessage("转换失败")
+                    self.statusBar().showMessage(tr(self._language, "status_conversion_failed"))
                 else:
-                    summary = f"⚠  完成: {s} 个成功，{f} 个失败（共 {t} 个）"
+                    summary = tr(self._language, "status_partial", success=s, fail=f, total=t)
                     pg.log_message(summary, "warning")
-                    self.statusBar().showMessage(f"{s} 成功 / {f} 失败")
+                    self.statusBar().showMessage(tr(self._language, "status_success_fail", success=s, fail=f))
 
             # av_page 用自己的 on_finished 更新按钮/进度
             if pg is self.av_page:
                 pg.on_finished(idx, status, display_msg)
             else:
+                if hasattr(pg, "_is_busy"):
+                    pg._is_busy = False
+                if hasattr(pg, "_replace_on_next_add"):
+                    pg._replace_on_next_add = True
                 pg.overall_progress_bar.setValue(100)
-                pg.overall_progress_bar.setFormat("总进度: 100%")
+                pg.overall_progress_bar.setFormat(tr(self._language, "progress_overall"))
                 pg.start_conversion_button.setEnabled(True)
                 pg.cancel_conversion_button.setEnabled(False)
             self._batch_page = None
+
+            # 开始下一个排队批次
+            if self._batch_queue:
+                next_batch = self._batch_queue.pop(0)
+                next_pg = next_batch[0]
+                next_pg.log_message(self._tr("log_queue_start"), "info")
+                self._start_batch(next_batch)
 
     # ── GPU ─────────────────────────────────────────────────────────
     def _on_gpu_vendor_changed(self, vendor: str):
@@ -982,7 +715,7 @@ class MainWindow(QMainWindow):
             f"{self._tr('gpu_setting_updated')}  ·  {self._vendor_status_text()}", 4000)
 
     def _vendor_status_text(self) -> str:
-        from format_factory.gui_pages.settings_page import GPU_VENDORS
+        from format_factory.gui.settings_page import GPU_VENDORS
         info = GPU_VENDORS.get(self._gpu_vendor, GPU_VENDORS["none"])
         return self._tr("gpu_none_label") if self._gpu_vendor == "none" else info["label"]
 
@@ -1005,6 +738,22 @@ class MainWindow(QMainWindow):
         self._update_ffmpeg_status_ui()
         return False
 
+    def _prompt_download_ffmpeg(self):
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(self._tr("ffmpeg_required_title"))
+        box.setText(self._tr("ffmpeg_required_msg"))
+        cancel_btn = box.addButton(self._tr("cancel"), QMessageBox.ButtonRole.RejectRole)
+        download_btn = box.addButton(self._tr("go_download"), QMessageBox.ButtonRole.AcceptRole)
+        box.setDefaultButton(download_btn)
+        box.exec()
+
+        if box.clickedButton() is not download_btn:
+            return
+
+        self.tab_widget.setCurrentWidget(self.settings_page)
+        self._on_download_ffmpeg_requested()
+
     def _update_ffmpeg_status_ui(self, refresh_action: bool = True):
         self._ffmpeg_ready = has_ffmpeg()
         if refresh_action:
@@ -1019,12 +768,23 @@ class MainWindow(QMainWindow):
         vendor_lbl = self._vendor_status_text()
         ffmpeg_lbl = self._tr("status_ffmpeg_ready") if self._ffmpeg_ready else self._tr("status_no_ffmpeg", action=action)
         self.statusBar().showMessage(f"{self._tr('status_ready')}  ·  {vendor_lbl}  ·  {ffmpeg_lbl}")
+        for pg in ("video_page", "audio_page", "image_page", "m3u8_page"):
+            page = getattr(self, pg, None)
+            if page is not None and hasattr(page, "_update_state"):
+                page._update_state()
+        if hasattr(self, "av_page") and self.av_page is not None:
+            if hasattr(self.av_page, "split_tab") and hasattr(self.av_page.split_tab, "_update_state"):
+                self.av_page.split_tab._update_state()
+            if hasattr(self.av_page, "merge_tab") and hasattr(self.av_page.merge_tab, "_update_state"):
+                self.av_page.merge_tab._update_state()
 
     # ── Close ────────────────────────────────────────────────────────
     def closeEvent(self, event):
         """关闭窗口时，终止仍在运行的 FFmpeg / FFprobe 后退出。"""
         if self.ffmpeg_handler:
             self.ffmpeg_handler.shutdown()
+        if self.cmd_ffmpeg_handler:
+            self.cmd_ffmpeg_handler.shutdown()
         if hasattr(self, "_wallpaper_svc"):
             self._wallpaper_svc.stop()
         event.accept()
@@ -1066,7 +826,7 @@ class MainWindow(QMainWindow):
                 self.settings_page.bg_lbl.setText(os.path.basename(restore))
             else:
                 self.settings_page._bg_path = ""
-                self.settings_page.bg_lbl.setText("未设置")
+                self.settings_page.bg_lbl.setText(self._tr("settings_not_set"))
 
     def _on_daily_refresh(self):
         """手动刷新：清除缓存 + 重新获取（force_refresh 内部已包含清缓存）。"""
@@ -1078,50 +838,34 @@ class MainWindow(QMainWindow):
         self._wallpaper_svc.set_api_url(self._daily_wp_api_url)
         if self._daily_wp_api_url:
             if self._daily_enabled:
-                self.settings_page.set_daily_status("壁纸 API 已自动应用，后续刷新将只使用当前自定义地址。")
+                self.settings_page.set_daily_status(self._tr("daily_api_applied"))
             else:
-                self.settings_page.set_daily_status("壁纸 API 已保存，但当前未启用每日壁纸，请先启用每日壁纸后才会生效。")
+                self.settings_page.set_daily_status(self._tr("daily_api_saved_disabled"))
         else:
-            self.settings_page.set_daily_status("未填写壁纸 API，已停用内置地址，请输入自定义链接。")
+            self.settings_page.set_daily_status(self._tr("daily_api_missing_custom"))
 
     def _on_daily_refresh_days_changed(self, refresh_days):
         self._daily_wp_refresh_days = self._normalize_daily_refresh_days(refresh_days)
         self._s.setValue("daily_wp_refresh_days", self._daily_wp_refresh_days)
         self._wallpaper_svc.set_refresh_policy(self._daily_wp_refresh_days)
-        label = "永久" if self._daily_wp_refresh_days == "manual" else f"{self._daily_wp_refresh_days} 天"
-        self.settings_page.set_daily_status(f"刷新策略已改为 {label}，将从明天开始生效。")
+        label = self._refresh_days_label(self._daily_wp_refresh_days)
+        self.settings_page.set_daily_status(self._tr("daily_refresh_pending", label=label))
 
     def _on_wallpaper_status(self, key: str):
         _MAP = {
-            "cached":   "已加载今日壁纸",
-            "fetching": "正在获取每日壁纸…",
-            "done":     "今日壁纸已更新",
+            "cached": self._tr("daily_status_cached"),
+            "fetching": self._tr("daily_status_fetching"),
+            "done": self._tr("daily_status_done"),
         }
         if key.startswith("fail:"):
             raw = key[5:]
-            if raw.startswith("url_error:"):
-                msg = f"网络错误: {raw[10:]}"
-            elif raw == "no_api":
-                msg = "未填写壁纸 API，请先输入一个自定义链接"
-            elif raw == "invalid_response":
-                msg = "API 响应格式无效，需返回 JSON url 或纯文本图片地址"
-            else:
-                msg = f"请求失败: {raw}"
-            self.settings_page.set_daily_status(f"❌ 获取失败: {msg}")
+            msg = self._wallpaper_error_text(raw)
+            self.settings_page.set_daily_status(self._tr("daily_error_fetch_failed", detail=msg))
         else:
             self.settings_page.set_daily_status(_MAP.get(key, key))
 
     def _on_wallpaper_error(self, key: str):
-        if key.startswith("url_error:"):
-            msg = f"网络错误: {key[10:]}"
-        elif key == "no_api":
-            msg = "未填写壁纸 API，请先输入一个自定义链接"
-        elif key == "invalid_response":
-            msg = "API 响应格式无效，需返回 JSON url 或纯文本图片地址"
-        elif key.startswith("error:"):
-            msg = f"请求异常: {key[6:]}"
-        else:
-            msg = key
+        msg = self._wallpaper_error_text(key)
         self.settings_page.set_daily_status(f"❌ {msg}")
 
     def _on_wallpaper_ready(self, local_path: str):
@@ -1139,7 +883,7 @@ class MainWindow(QMainWindow):
         self._bg.set_bg_colors(self._bg_colors)
         self._apply_theme()
         self.settings_page.set_daily_bg_preview(local_path)
-        self.statusBar().showMessage("🌅 每日壁纸已更新", 4000)
+        self.statusBar().showMessage(self._tr("daily_updated_toast"), 4000)
 
     # ── Updater ──────────────────────────────────────────────────────
     def _on_check_update_requested(self):
@@ -1154,11 +898,11 @@ class MainWindow(QMainWindow):
         url   = info.get("update_url", "") or info.get("html_url", "") or info.get("zipball_url", "")
         required_update = _is_update_required(info)
 
-        status = f"{'🚨' if required_update else '🆕'} 发现新版本 v{ver}"
+        status = self._tr("update_found_status", icon="🚨" if required_update else "🆕", version=ver)
         if date:
             status += f"  ({date})"
         if required_update:
-            status += "  ·  需要更新"
+            status += self._tr("update_required_suffix")
         self.settings_page.set_update_status(status)
         self.settings_page.set_version_badge(True, ver)
         # 公告由 _on_versions_loaded 统一渲染（新版本+当前版本）
@@ -1173,7 +917,7 @@ class MainWindow(QMainWindow):
 
     def _show_update_dialog(self, ver: str, release_date: str, notes: str, url: str, required_update: bool) -> bool:
         dialog = QDialog(self)
-        dialog.setWindowTitle("发现新版本")
+        dialog.setWindowTitle(self._tr("update_dialog_title"))
         dialog.setModal(True)
         dialog.resize(620, 520)
 
@@ -1181,21 +925,21 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(18, 18, 18, 14)
         root.setSpacing(10)
 
-        title = QLabel(f"<b>发现新版本 v{ver}</b>")
+        title = QLabel(f"<b>{self._tr('update_dialog_heading', version=ver)}</b>")
         title.setTextFormat(Qt.TextFormat.RichText)
         root.addWidget(title)
 
         meta = []
         if release_date:
-            meta.append(f"发布日期：{release_date}")
-        meta.append("更新类型：必须更新" if required_update else "更新类型：可选更新")
+            meta.append(self._tr("update_release_date", date=release_date))
+        meta.append(self._tr("update_type_required") if required_update else self._tr("update_type_optional"))
         meta_label = QLabel("  ·  ".join(meta))
         meta_label.setObjectName("section_title")
         meta_label.setWordWrap(True)
         root.addWidget(meta_label)
 
         if required_update:
-            warn = QLabel("<b>此版本需要更新，当前版本已不再受支持。</b>")
+            warn = QLabel(f"<b>{self._tr('update_required_warning')}</b>")
             warn.setTextFormat(Qt.TextFormat.RichText)
             warn.setWordWrap(True)
             root.addWidget(warn)
@@ -1204,25 +948,25 @@ class MainWindow(QMainWindow):
         notes_view.setOpenExternalLinks(True)
         notes_view.setReadOnly(True)
         notes_view.setMinimumHeight(260)
-        notes_view.setMarkdown(notes or "暂无更新说明。")
+        notes_view.setMarkdown(notes or self._tr("update_notes_empty"))
         root.addWidget(notes_view, 1)
 
         cb_ignore = None
         if not required_update:
-            cb_ignore = QCheckBox("不再显示此版本的更新提示")
+            cb_ignore = QCheckBox(self._tr("update_ignore_version"))
             root.addWidget(cb_ignore)
 
         buttons = QDialogButtonBox(dialog)
         download_btn = None
         later_btn = None
         if url:
-            download_btn = buttons.addButton("立即下载", QDialogButtonBox.ButtonRole.AcceptRole)
+            download_btn = buttons.addButton(self._tr("update_download_now"), QDialogButtonBox.ButtonRole.AcceptRole)
             download_btn.clicked.connect(dialog.accept)
             if not required_update:
-                later_btn = buttons.addButton("稍后再说", QDialogButtonBox.ButtonRole.RejectRole)
+                later_btn = buttons.addButton(self._tr("update_later"), QDialogButtonBox.ButtonRole.RejectRole)
                 later_btn.clicked.connect(dialog.reject)
         else:
-            later_btn = buttons.addButton("关闭", QDialogButtonBox.ButtonRole.AcceptRole)
+            later_btn = buttons.addButton(self._tr("close"), QDialogButtonBox.ButtonRole.AcceptRole)
             later_btn.clicked.connect(dialog.accept)
 
         bottom = QHBoxLayout()
@@ -1240,8 +984,8 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QProgressDialog
         import os
 
-        self._dl_progress = QProgressDialog(f"正在下载更新 v{ver}... (0%)", "取消", 0, 100, self)
-        self._dl_progress.setWindowTitle("下载更新")
+        self._dl_progress = QProgressDialog(tr(self._language, "download_update_progress", ver=ver) + " (0%)", tr(self._language, "cancel"), 0, 100, self)
+        self._dl_progress.setWindowTitle(tr(self._language, "download_update_title"))
         # 修改为非模态，不阻塞主窗口操作
         self._dl_progress.setWindowModality(Qt.WindowModality.NonModal)
         self._dl_progress.setAutoClose(True)
@@ -1256,14 +1000,18 @@ class MainWindow(QMainWindow):
         def on_progress(bytes_read, total_size):
             if total_size > 0:
                 percent = int(bytes_read * 100 / total_size)
-                self._dl_progress.setLabelText(f"正在下载更新 v{ver}... ({percent}%)")
+                self._dl_progress.setLabelText(self._tr("download_update_progress", ver=ver) + f" ({percent}%)")
                 self._dl_progress.setValue(percent)
 
         def on_finished(save_path, error_msg):
             self._dl_progress.close()
             if error_msg:
                 if error_msg != "cancelled":
-                    QMessageBox.warning(self, "下载失败", f"更新下载失败:\n{error_msg}")
+                    QMessageBox.warning(
+                        self,
+                        self._tr("update_download_failed_title"),
+                        self._tr("update_download_failed_msg", message=error_msg),
+                    )
             elif save_path and os.path.exists(save_path):
                 self._on_download_complete(save_path)
 
@@ -1287,17 +1035,21 @@ class MainWindow(QMainWindow):
             try:
                 app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
                 replace_app_with_archive(save_path, app_root)
-                QMessageBox.information(self, "更新完成", "已替换应用文件，请重新启动软件。")
+                QMessageBox.information(self, self._tr("update_complete_title"), self._tr("update_complete_msg"))
             except Exception as e:
-                QMessageBox.critical(self, "更新失败", f"无法替换应用文件:\n{str(e)}\n\n文件保存在: {save_path}")
+                QMessageBox.critical(
+                    self,
+                    self._tr("update_replace_failed_title"),
+                    self._tr("update_replace_failed_msg", message=str(e), path=save_path),
+                )
                 return
             from PyQt6.QtWidgets import QApplication
             QApplication.quit()
             return
 
         msg = QMessageBox(self)
-        msg.setWindowTitle("下载完成")
-        msg.setText("更新包下载完成，准备安装。软件将立即关闭。")
+        msg.setWindowTitle(self._tr("update_download_complete_title"))
+        msg.setText(self._tr("update_download_complete_msg"))
         msg.setStandardButtons(QMessageBox.StandardButton.Ok)
         msg.exec()
 
@@ -1306,7 +1058,11 @@ class MainWindow(QMainWindow):
                 # Windows 下使用 os.startfile 或 subprocess
                 os.startfile(save_path)
         except Exception as e:
-            QMessageBox.critical(self, "执行失败", f"无法自动运行安装包:\n{str(e)}\n\n文件保存在: {save_path}")
+            QMessageBox.critical(
+                self,
+                self._tr("update_run_failed_title"),
+                self._tr("update_run_failed_msg", message=str(e), path=save_path),
+            )
             return
 
         # 启动安装包后，退出当前应用
@@ -1377,13 +1133,13 @@ class MainWindow(QMainWindow):
         if newer_parts:
             sections.append("\n\n---\n\n".join(newer_parts))
         if current_part:
-            sections.append(f"## 当前版本\n\n{current_part}")
+            sections.append(f"## {self._tr('update_current_version_section')}\n\n{current_part}")
         return "\n\n---\n\n".join(sections)
 
     def _apply_update_versions_to_ui(self, versions: list, *, offline_fallback: bool = False, fetched_at: str = ""):
         self.settings_page.populate_versions(versions)
         if not versions:
-            self.settings_page.set_update_status("版本列表为空，请稍后重试")
+            self.settings_page.set_update_status(self._tr("update_versions_empty"))
             self.settings_page.set_update_notes("")
             return
 
@@ -1394,22 +1150,29 @@ class MainWindow(QMainWindow):
         required_update = _is_update_required(latest)
 
         if offline_fallback:
-            suffix = f"（上次获取：{fetched_at}）" if fetched_at else "（上次成功获取）"
+            suffix = (
+                self._tr("update_offline_suffix_at", time=fetched_at)
+                if fetched_at else self._tr("update_offline_suffix_generic")
+            )
             if has_update:
-                status = f"{'🚨' if required_update else '🆕'} 当前离线，显示缓存的更新信息 v{latest_ver}"
+                status = self._tr(
+                    "update_offline_status_new",
+                    icon="🚨" if required_update else "🆕",
+                    version=latest_ver,
+                )
                 if latest_date:
                     status += f"  ({latest_date})"
                 if required_update:
-                    status += "  ·  需要更新"
+                    status += self._tr("update_required_suffix")
                 status += f"  {suffix}"
                 self.settings_page.set_version_badge(True, latest_ver)
             else:
-                status = f"📦 当前离线，显示缓存的版本信息 v{APP_VERSION}  {suffix}"
+                status = self._tr("update_offline_status_current", version=APP_VERSION, suffix=suffix)
                 self.settings_page.set_version_badge(False)
             self.settings_page.set_update_status(status)
         else:
             if not has_update:
-                self.settings_page.set_update_status(f"✅ 当前已是最新版本 v{APP_VERSION}")
+                self.settings_page.set_update_status(self._tr("update_latest_status", version=APP_VERSION))
                 self.settings_page.set_version_badge(False)
 
         self.settings_page.set_update_notes(self._build_update_notes_markdown(versions))
@@ -1431,24 +1194,25 @@ class MainWindow(QMainWindow):
                 )
                 return
         if err.startswith("url_error:"):
-            msg = f"网络错误: {err[10:]}"
+            msg = self._tr("error_network", detail=err[10:])
         elif err.startswith("error:"):
-            msg = f"检查失败: {err[6:]}"
+            msg = self._tr("update_check_failed", detail=err[6:])
         else:
-            msg = f"检查失败: {err}"
+            msg = self._tr("update_check_failed", detail=err)
         self.settings_page.set_update_status(f"❌ {msg}")
 
     def _on_download_ffmpeg_requested(self):
         from PyQt6.QtWidgets import QProgressDialog
 
         if self._ffmpeg_ready and self.ffmpeg_handler is not None:
-            self.settings_page.set_ffmpeg_status("已检测到 FFmpeg，无需重复更新。", downloading=False)
+            self.settings_page.set_ffmpeg_status(self._tr("ffmpeg_already_present"), downloading=False)
             return
 
-        action = self._ffmpeg_action_text()
+        action_mode = self._ffmpeg_action_text()
+        action = self._tr("action_update") if action_mode == "update" else self._tr("action_download")
 
-        self._ffmpeg_progress = QProgressDialog(f"正在{action} FFmpeg... (0%)", "取消", 0, 100, self)
-        self._ffmpeg_progress.setWindowTitle(f"{action} FFmpeg")
+        self._ffmpeg_progress = QProgressDialog(tr(self._language, "ffmpeg_download_progress", action=action) + " (0%)", tr(self._language, "cancel"), 0, 100, self)
+        self._ffmpeg_progress.setWindowTitle(tr(self._language, "ffmpeg_download_title", action=action))
         self._ffmpeg_progress.setWindowModality(Qt.WindowModality.NonModal)
         self._ffmpeg_progress.setAutoClose(True)
         self._ffmpeg_progress.setAutoReset(True)
@@ -1461,43 +1225,54 @@ class MainWindow(QMainWindow):
         def on_progress(done, total, stage):
             if stage.startswith("download"):
                 percent = int(done * 100 / total) if total > 0 else 0
-                self._ffmpeg_progress.setLabelText(f"正在{action} FFmpeg... ({percent}%)")
+                self._ffmpeg_progress.setLabelText(tr(self._language, "ffmpeg_download_progress", action=action) + f" ({percent}%)")
                 self._ffmpeg_progress.setValue(percent)
                 self.settings_page.set_ffmpeg_status(
-                    f"正在{action} FFmpeg... {percent}%", downloading=True)
+                    tr(self._language, "ffmpeg_download_progress", action=action) + f" {percent}%", downloading=True)
             else:
                 percent = int(done * 100 / total) if total > 0 else 0
-                self._ffmpeg_progress.setLabelText(f"正在解压 FFmpeg... ({percent}%)")
+                self._ffmpeg_progress.setLabelText(self._tr("ffmpeg_extract_progress", percent=percent))
                 self._ffmpeg_progress.setValue(percent)
                 self.settings_page.set_ffmpeg_status(
-                    f"正在解压 FFmpeg... {percent}%", downloading=True)
+                    self._tr("ffmpeg_extract_progress_inline", percent=percent), downloading=True)
 
         def on_finished(success, message):
             self._ffmpeg_progress.close()
             if not success:
                 if message != "cancelled":
-                    QMessageBox.warning(self, f"FFmpeg{action}失败", f"FFmpeg{action}失败：\n{message}")
+                    QMessageBox.warning(
+                        self,
+                        self._tr("ffmpeg_failed_title", action=action),
+                        self._tr("ffmpeg_failed_msg", action=action, message=message),
+                    )
                     self.settings_page.set_ffmpeg_status(
-                        f"FFmpeg{action}失败：{message}", downloading=False)
+                        self._tr("ffmpeg_failed_msg", action=action, message=message), downloading=False)
                 else:
-                    self.settings_page.set_ffmpeg_status(f"已取消 FFmpeg{action}。", downloading=False)
+                    self.settings_page.set_ffmpeg_status(
+                        self._tr("ffmpeg_cancelled_msg", action=action), downloading=False)
                 return
 
             try:
                 self.ffmpeg_handler = FFmpegHandler()
+                self.cmd_ffmpeg_handler = FFmpegHandler()
                 self._ffmpeg_ready = True
             except FileNotFoundError as e:
                 self.ffmpeg_handler = None
+                self.cmd_ffmpeg_handler = None
                 self._ffmpeg_ready = False
-                QMessageBox.warning(self, "FFmpeg 安装异常", str(e))
+                QMessageBox.warning(self, self._tr("ffmpeg_install_error"), str(e))
                 self.settings_page.set_ffmpeg_status(str(e), downloading=False)
                 return
 
             self._attach_ffmpeg_handler_to_pages()
             self._connect_ffmpeg_handler_signals()
             self._update_ffmpeg_status_ui()
-            self.statusBar().showMessage(f"FFmpeg{action}并安装完成", 5000)
-            QMessageBox.information(self, f"{action}完成", f"FFmpeg 已{action.lower()}并安装完成。")
+            self.statusBar().showMessage(self._tr("ffmpeg_done_msg", action_lower=action.lower()), 5000)
+            QMessageBox.information(
+                self,
+                self._tr("ffmpeg_done_title", action=action),
+                self._tr("ffmpeg_done_msg", action_lower=action.lower()),
+            )
 
         def on_cancel():
             self._ffmpeg_dl_thread.cancel()
@@ -1506,7 +1281,7 @@ class MainWindow(QMainWindow):
         self._ffmpeg_dl_thread.finished.connect(on_finished)
         self._ffmpeg_progress.canceled.connect(on_cancel)
 
-        self.settings_page.set_ffmpeg_status(f"正在准备{action} FFmpeg…", downloading=True)
+        self.settings_page.set_ffmpeg_status(self._tr("ffmpeg_preparing", action=action), downloading=True)
         self._ffmpeg_dl_thread.start()
         self._ffmpeg_progress.show()
 
@@ -1545,8 +1320,10 @@ class MainWindow(QMainWindow):
                 handler.file_info_ready.connect(pg.handle_file_info_ready)
             except Exception:
                 pass
+            if hasattr(pg, "_update_state"):
+                pg._update_state()
 
-        self.command_page.attach_ffmpeg_handler(handler)
+        self.command_page.attach_ffmpeg_handler(self.cmd_ffmpeg_handler)
 
         self.audio_page.ffmpeg_handler = handler
         try:

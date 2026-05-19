@@ -1,4 +1,4 @@
-﻿# format_factory/gui_pages/av_splitter_page.py
+﻿# format_factory/gui/av_splitter_page.py
 """
 音视频分离 / 合成页面
   • 分离：从视频文件中提取纯视频流 或 纯音频流
@@ -347,7 +347,12 @@ class _LogMixin:
 
     def _clear_log(self):
         self._log.clear()
-        self._prog_lbl.clear()
+
+
+class _FFmpegPromptMixin:
+    def _has_ffmpeg_ready(self) -> bool:
+        handler = getattr(self, "_handler", None)
+        return bool(getattr(handler, "ffmpeg_path", ""))
 
     def _copy_log(self):
         QApplication.clipboard().setText(self._log.toPlainText())
@@ -400,7 +405,9 @@ class _LogMixin:
 # ═══════════════════════════════════════════════════════════════════════
 #  分离 Tab
 # ═══════════════════════════════════════════════════════════════════════
-class SplitTab(QWidget, _LogMixin):
+class SplitTab(QWidget, _LogMixin, _FFmpegPromptMixin):
+    ffmpeg_download_prompt_requested = pyqtSignal()
+
     """
     从视频文件中分离出：
       - 纯视频流（去掉音频）
@@ -631,8 +638,8 @@ class SplitTab(QWidget, _LogMixin):
     def _update_state(self):
         ok = bool(self._files and self._out_dir)
         self._start_btn.setToolTip("")
-        if not self._handler:
-            self._start_btn.setEnabled(False)
+        if not self._has_ffmpeg_ready():
+            self._start_btn.setEnabled(ok)
             self._start_btn.setToolTip("未找到 FFmpeg，请到设置下载 FFmpeg")
             return
         self._start_btn.setEnabled(ok)
@@ -660,10 +667,8 @@ class SplitTab(QWidget, _LogMixin):
 
     # ── 开始处理 ──────────────────────────────────────────────────────
     def _start(self):
-        if not self._handler:
-            self.log_message("未找到 FFmpeg，请到设置下载", "error")
-            self._start_btn.setEnabled(bool(self._files and self._out_dir))
-            self._cancel_btn.setEnabled(False)
+        if not self._has_ffmpeg_ready():
+            self.ffmpeg_download_prompt_requested.emit()
             return
         if not self._files:
             self.log_message("请先添加视频文件", "error"); return
@@ -789,7 +794,9 @@ class SplitTab(QWidget, _LogMixin):
 # ═══════════════════════════════════════════════════════════════════════
 #  合成 Tab
 # ═══════════════════════════════════════════════════════════════════════
-class MergeTab(QWidget, _LogMixin):
+class MergeTab(QWidget, _LogMixin, _FFmpegPromptMixin):
+    ffmpeg_download_prompt_requested = pyqtSignal()
+
     """
     将一条视频文件 + 一条音频文件合并为一个输出文件。
     支持批量：每行视频对应一行音频（顺序配对），也可 1 对 N（一个音频配多个视频）。
@@ -1014,8 +1021,8 @@ class MergeTab(QWidget, _LogMixin):
     def _update_state(self):
         ok = bool(self._video_files and self._audio_file and self._out_dir)
         self._start_btn.setToolTip("")
-        if not self._handler:
-            self._start_btn.setEnabled(False)
+        if not self._has_ffmpeg_ready():
+            self._start_btn.setEnabled(ok)
             self._start_btn.setToolTip("未找到 FFmpeg，请到设置下载 FFmpeg")
             return
         self._start_btn.setEnabled(ok)
@@ -1065,10 +1072,8 @@ class MergeTab(QWidget, _LogMixin):
 
     # ── 开始处理 ──────────────────────────────────────────────────────
     def _start(self):
-        if not self._handler:
-            self.log_message("未找到 FFmpeg，请到设置下载", "error")
-            self._start_btn.setEnabled(bool(self._video_files and self._audio_file and self._out_dir))
-            self._cancel_btn.setEnabled(False)
+        if not self._has_ffmpeg_ready():
+            self.ffmpeg_download_prompt_requested.emit()
             return
         if not self._video_files:
             self.log_message("请先添加视频文件", "error"); return
@@ -1185,6 +1190,7 @@ class AVSplitterPage(QWidget):
     conversion_requested     = pyqtSignal(int, str, list, str)   # 分离
     merge_requested          = pyqtSignal(int, str, str, str, list)  # 合成
     cancel_conversion_signal = pyqtSignal()
+    ffmpeg_download_prompt_requested = pyqtSignal()
 
     def __init__(self, ffmpeg_handler, parent=None):
         super().__init__(parent)
@@ -1214,8 +1220,10 @@ class AVSplitterPage(QWidget):
         # 把子 tab 的信号转发出去
         self.split_tab.task_ready.connect(self._on_split_task)
         self.split_tab.cancel_sig.connect(self.cancel_conversion_signal)
+        self.split_tab.ffmpeg_download_prompt_requested.connect(self.ffmpeg_download_prompt_requested)
         self.merge_tab.merge_ready.connect(self._on_merge_task)
         self.merge_tab.cancel_sig.connect(self.cancel_conversion_signal)
+        self.merge_tab.ffmpeg_download_prompt_requested.connect(self.ffmpeg_download_prompt_requested)
 
     # ── 信号转发 ──────────────────────────────────────────────────────
     def _on_split_task(self, idx: int, inp: str, out: str, args: list):

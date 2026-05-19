@@ -9,8 +9,17 @@ from mutagen.id3 import ID3, TIT2, TPE1, TALB, APIC, ID3NoHeaderError
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover
 
-CORE_KEY = bytes.fromhex("687a4852416d736f356b496e62617857")
-META_KEY = bytes.fromhex("2331346C6A6B5F215C5D2630553C2728")
+# 密钥通过多种子 XOR + base64 混淆存储，避免明文暴露
+_KS = [90, 60, 126, 145, 163, 213, 232, 31, 70, 184, 205, 43, 105, 244, 131, 7]
+_CK = "MkY2w+K4m3Bz04RFC5X7UA=="
+_MK = "eQ1K/cm+tz4a5esbPMikLw=="
+
+def _dk(b: str) -> bytes:
+    raw = base64.b64decode(b)
+    return bytes(raw[i] ^ _KS[i] for i in range(16))
+
+CORE_KEY = _dk(_CK)
+META_KEY = _dk(_MK)
 
 def unpad(s):
     return s[:-s[-1]]

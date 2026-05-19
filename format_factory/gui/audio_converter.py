@@ -1,8 +1,10 @@
-﻿# format_factory/gui_pages/audio_converter.py
+# format_factory/gui/audio_converter.py
 import os
 import shutil
 from .base_page import BaseConverterPage
 from .decrypt_ncm import decrypt_ncm
+from ..config import AUDIO_INPUT_EXTENSIONS
+from ..i18n import tr
 
 
 class AudioConverterPage(BaseConverterPage):
@@ -16,11 +18,14 @@ class AudioConverterPage(BaseConverterPage):
             self.ffmpeg_handler.conversion_finished.connect(self._on_conversion_finished)
 
     def _get_file_filter(self):
-        return "音频文件 (*.mp3 *.wav *.aac *.flac *.ogg *.m4a *.opus *.ncm);;所有文件 (*.*)"
+        audio_label = tr(self._language, "file_filter_audio")
+        all_label = tr(self._language, "file_filter_all")
+        patterns = " ".join(f"*.{ext}" for ext in AUDIO_INPUT_EXTENSIONS)
+        return f"{audio_label} ({patterns});;{all_label} (*.*)"
 
     def _start_conversion_process(self):
         if not self.ffmpeg_handler:
-            self.log_message("未找到 FFmpeg，请到设置下载", "error")
+            self.log_message(tr(self._language, "ffmpeg_not_found_download"), "error")
             self.start_conversion_button.setEnabled(True)
             self.cancel_conversion_button.setEnabled(False)
             return
@@ -40,7 +45,7 @@ class AudioConverterPage(BaseConverterPage):
                 if not os.path.exists(self.cache_dir):
                     os.makedirs(self.cache_dir)
 
-                self.log_message(f"[{i+1}/{len(self.input_files)}] 解密 {os.path.basename(inp)}...", "info")
+                self.log_message(f"[{i+1}/{len(self.input_files)}] " + tr(self._language, "log_decrypting", name=os.path.basename(inp)), "info")
                 try:
                     decrypted_path = decrypt_ncm(inp, self.cache_dir)
                     if decrypted_path and os.path.exists(decrypted_path):
@@ -52,8 +57,8 @@ class AudioConverterPage(BaseConverterPage):
                             out_path = os.path.join(self.output_dir, os.path.basename(decrypted_path))
                             shutil.copy2(decrypted_path, out_path)
                             self.log_message(
-                                f"[{i+1}/{len(self.input_files)}] "
-                                f"{os.path.basename(inp)} 解密完成并移动到输出目录", "success")
+                                f"[{i+1}/{len(self.input_files)}] " +
+                                tr(self._language, "log_decrypt_done_moved", name=os.path.basename(inp)), "success")
                             self.ffmpeg_handler.conversion_finished.emit(i, "success", f"'{os.path.basename(out_path)}' ✓")
                         else:
                             # Need conversion
@@ -62,11 +67,11 @@ class AudioConverterPage(BaseConverterPage):
                                 f"{os.path.basename(decrypted_path)}  →  .{fmt}", "info")
                             self.conversion_requested.emit(i, decrypted_path, args, stem)
                     else:
-                        self.log_message(f"[{i+1}/{len(self.input_files)}] 解密失败: {os.path.basename(inp)}", "error")
-                        self.ffmpeg_handler.conversion_finished.emit(i, "failure", "NCM 解密失败")
+                        self.log_message(f"[{i+1}/{len(self.input_files)}] " + tr(self._language, "log_decrypt_failed", name=os.path.basename(inp)), "error")
+                        self.ffmpeg_handler.conversion_finished.emit(i, "failure", tr(self._language, "ncm_decrypt_failed"))
                 except Exception as e:
-                    self.log_message(f"[{i+1}/{len(self.input_files)}] 解密发生错误: {str(e)}", "error")
-                    self.ffmpeg_handler.conversion_finished.emit(i, "failure", f"NCM 解密错误: {str(e)}")
+                    self.log_message(f"[{i+1}/{len(self.input_files)}] " + tr(self._language, "log_decrypt_error", error=str(e)), "error")
+                    self.ffmpeg_handler.conversion_finished.emit(i, "failure", tr(self._language, "ncm_decrypt_error", error=str(e)))
             else:
                 self.log_message(
                     f"[{i+1}/{len(self.input_files)}] "
@@ -87,7 +92,7 @@ class AudioConverterPage(BaseConverterPage):
             self.ncm_cache_files = []
             self.ncm_processing = False
         except Exception as e:
-            self.log_message(f"清理缓存失败: {str(e)}", "warning")
+            self.log_message(tr(self._language, "log_cleaning_cache_failed", error=str(e)), "warning")
 
     def _on_conversion_finished(self, idx, status, msg):
         # We use a heuristic: if we reach the last index or get cancelled, we clean up.

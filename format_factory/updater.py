@@ -10,21 +10,24 @@ import json
 import urllib.request
 import urllib.error
 import os
+import hashlib
 import shutil
 import zipfile
 import tarfile
 import platform
 import math
 import threading
-import ssl
 
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
+from .net_utils import open_url
 
 _API_URL = "https://api.github.com/repos/xiaofa520/Formix/releases/latest"
 _TIMEOUT = 10
 _MAX_DOWNLOAD_THREADS = 8
 _DOWNLOAD_USER_AGENT = "Mozilla/5.0 FormatFactory/1.0"
 
+# 默认不允许 TLS 证书校验降级。仅在明确配置后才启用不安全回退。
+_ALLOW_INSECURE_TLS = False
 
 def _is_retryable_download_error(exc: Exception | str) -> bool:
     text = str(exc or "").lower()
@@ -41,25 +44,8 @@ def _is_retryable_download_error(exc: Exception | str) -> bool:
     ))
 
 
-def _request_with_tls_retry(req: urllib.request.Request, timeout: int, *, allow_insecure_retry: bool = True):
-    last_exc = None
-    contexts = [None]
-    if allow_insecure_retry:
-        insecure = ssl.create_default_context()
-        insecure.check_hostname = False
-        insecure.verify_mode = ssl.CERT_NONE
-        contexts.append(insecure)
-    for ctx in contexts:
-        try:
-            return urllib.request.urlopen(req, timeout=timeout, context=ctx)
-        except Exception as exc:
-            last_exc = exc
-            if ctx is None and _is_retryable_download_error(exc):
-                continue
-            raise
-    if last_exc:
-        raise last_exc
-    raise RuntimeError("download_open_failed")
+def _request_with_tls_retry(req: urllib.request.Request, timeout: int, *, allow_insecure_retry: bool = False):
+    return open_url(req, timeout, allow_insecure_retry=allow_insecure_retry)
 
 
 def _download_thread_count(total_size: int) -> int:
@@ -145,6 +131,7 @@ class _ParallelDownloader:
             self.progress_cb(self._downloaded, total_size)
 
     def download(self):
+        part_paths = []
         try:
             info = _probe_download(self.url)
         except Exception:
@@ -279,6 +266,70 @@ def _pick_release_asset(assets: list) -> str:
     return fallback
 
 
+def _select_asset_by_filters(assets: list, include: list[str], exclude: list[str]) -> dict:
+    include = [str(item).lower() for item in (include or [])]
+    exclude = [str(item).lower() for item in (exclude or [])]
+    candidates = []
+
+    for asset in assets or []:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name", "") or "").lower()
+        browser_url = str(asset.get("browser_download_url", "") or "")
+        if not name or not browser_url:
+            continue
+        if include and not all(token in name for token in include):
+            continue
+        if exclude and any(token in name for token in exclude):
+            continue
+        candidates.append(asset)
+
+    if not candidates:
+        raise RuntimeError("未找到匹配当前系统架构的 FFmpeg 资源")
+
+    candidates.sort(key=lambda item: len(str(item.get("name", ""))))
+    return candidates[0]
+
+
+def _resolve_download_spec(download_spec: dict) -> dict:
+    spec = dict(download_spec or {})
+    resolver = str(spec.get("resolver", "") or "").strip().lower()
+    if resolver != "btbn_latest_release":
+        return spec
+
+    repo_api = str(spec.get("repo_api", "") or "").strip()
+    if not repo_api:
+        raise RuntimeError("FFmpeg 下载配置缺少仓库 API 地址")
+
+    req = urllib.request.Request(
+        repo_api,
+        headers={
+            "User-Agent": _DOWNLOAD_USER_AGENT,
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    with _request_with_tls_retry(req, _TIMEOUT, allow_insecure_retry=_ALLOW_INSECURE_TLS) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"FFmpeg 资源列表解析失败: {exc}") from exc
+
+    assets = payload.get("assets", []) if isinstance(payload, dict) else []
+    selected = _select_asset_by_filters(
+        assets,
+        spec.get("asset_filters", {}).get("include", []),
+        spec.get("asset_filters", {}).get("exclude", []),
+    )
+
+    resolved = dict(spec)
+    resolved["downloads"] = [{
+        "url": selected.get("browser_download_url", ""),
+        "filename": selected.get("name", "") or selected.get("browser_download_url", "").split("/")[-1],
+    }]
+    return resolved
+
+
 def _parse_version(v: str) -> tuple:
     """把 '1.2.3' 转成 (1, 2, 3) 便于比较大小。"""
     try:
@@ -297,7 +348,7 @@ class _CheckThread(QThread):
             req = urllib.request.Request(
                 _API_URL,
                 headers={"User-Agent": "Mozilla/5.0 FormatFactory/1.0"})
-            with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            with _request_with_tls_retry(req, _TIMEOUT, allow_insecure_retry=_ALLOW_INSECURE_TLS) as resp:
                 raw = resp.read().decode("utf-8").strip()
 
             # 严格解析：响应必须是合法 JSON，否则直接报错
@@ -346,6 +397,7 @@ class UpdateDownloaderThread(QThread):
         self._is_cancelled = True
 
     def run(self):
+        save_path = ""
         try:
             if not os.path.exists(self.save_dir):
                 os.makedirs(self.save_dir, exist_ok=True)
@@ -381,6 +433,34 @@ class UpdateDownloaderThread(QThread):
                     pass
             self.finished.emit("", str(e))
 
+
+def verify_sha256(file_path: str, expected_sha256: str) -> bool:
+    """验证下载文件的 SHA-256 哈希。"""
+    if not expected_sha256 or not os.path.isfile(file_path):
+        return True
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                sha256_hash.update(chunk)
+        actual = sha256_hash.hexdigest()
+        return actual.lower() == expected_sha256.lower()
+    except Exception:
+        return False
+
+
+def compute_sha256(file_path: str) -> str:
+    """计算文件的 SHA-256 哈希（十六进制字符串）。"""
+    if not os.path.isfile(file_path):
+        return ""
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                sha256_hash.update(chunk)
+        return sha256_hash.hexdigest()
+    except Exception:
+        return ""
 
 def replace_app_with_archive(archive_path: str, app_root: str):
     temp_root = os.path.join(os.path.dirname(archive_path), "_formix_update_extract")
@@ -492,7 +572,8 @@ class FFmpegDownloadThread(QThread):
         try:
             os.makedirs(self.cache_dir, exist_ok=True)
             os.makedirs(self.install_dir, exist_ok=True)
-            downloads = self.download_spec.get("downloads", [])
+            resolved_spec = _resolve_download_spec(self.download_spec)
+            downloads = resolved_spec.get("downloads", [])
             if not downloads:
                 raise RuntimeError("未找到可用的 FFmpeg 下载链接")
 

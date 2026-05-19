@@ -15,7 +15,19 @@ import re
 import json
 
 from PyQt6.QtCore import QObject, pyqtSignal
-from format_factory.config import get_ffmpeg_path, get_ffprobe_path, get_ffplay_path
+from format_factory.config import (
+    get_ffmpeg_path,
+    get_ffprobe_path,
+    get_ffplay_path,
+    VIDEO_FORMATS,
+    AUDIO_FORMATS,
+    IMAGE_FORMATS,
+)
+
+
+_VIDEO_OUTPUT_EXTS = {"." + ext.lower() for ext in VIDEO_FORMATS}
+_AUDIO_OUTPUT_EXTS = {"." + ext.lower() for ext in AUDIO_FORMATS}
+_IMAGE_OUTPUT_EXTS = {"." + ext.lower() for ext in IMAGE_FORMATS}
 
 
 def _is_stats_line(line: str) -> bool:
@@ -29,9 +41,33 @@ def _is_stats_line(line: str) -> bool:
     """
     s = line.strip()
     if re.match(r"\[(?:libx264|libx265|aac|libmp3lame|libvorbis|libopus|"
-                r"libvpx|mpeg4|flv)\s*@\s*[0-9a-fA-Fx]+\]", s):
+                r"libvpx|mpeg4|flv|h264_amf|h264_nvenc|hevc_amf|hevc_nvenc)\s*@\s*[0-9a-fA-Fx]+\]", s):
         return True
     if re.match(r"(?:kb/s:|Conversion failed!|frame=|fps=|bitrate=|speed=)", s):
+        return True
+    if _is_progress_line(line):
+        return True
+    return False
+
+
+def _is_progress_line(line: str) -> bool:
+    """
+    Return True for FFmpeg dynamic status lines that update in-place
+    (frame progress, GPU encoder status, etc.).  Used to suppress
+    noisy terminal output in terminal mode.
+    """
+    s = line.strip()
+    if not s:
+        return False
+    # Standard progress: frame= ... fps= ... speed= ...
+    if re.match(r"^\s*frame=\s*\d+", s):
+        return True
+    # GPU encoder status: AMF / NVENC style
+    # "86.41 M-A:  0.000 fd=   0 aq=  416KB vq=    0KB sq=    0B"
+    if all(token in s for token in ("fd=", "aq=", "vq=", "sq=")):
+        return True
+    # Progress-line keywords that appear mid-line (e.g. "speed=", "bitrate=")
+    if re.search(r"\bspeed=\s*[\d.]+x", s) or re.search(r"\bbitrate=\s*[\d.]+kbits/s", s):
         return True
     return False
 
@@ -179,10 +215,7 @@ class FFmpegHandler(QObject):
         if not os.path.exists(out):
             return "missing"
 
-        # M3U8 playlist 文件本身很小，跳过大小检查
-        if out.endswith(".m3u8"):
-            return "ok"
-
+        out_ext = os.path.splitext(str(out or ""))[1].lower()
         out_sz = os.path.getsize(out)
 
         # Always delete zero-byte files
@@ -194,6 +227,14 @@ class FFmpegHandler(QObject):
                 pass
             return "deleted"
 
+        # 这些格式天然可能非常小，不能用“相对源文件比例”判断损坏
+        if out_ext in _AUDIO_OUTPUT_EXTS or out_ext in _IMAGE_OUTPUT_EXTS:
+            return "ok"
+
+        # M3U8 playlist 文件本身很小，跳过大小检查
+        if out_ext == ".m3u8":
+            return "ok"
+
         # Compare to source size where available
         try:
             inp_sz = os.path.getsize(inp) if inp and os.path.exists(inp) else 0
@@ -204,8 +245,12 @@ class FFmpegHandler(QObject):
         # it's almost certainly a corrupt stub from an aborted encode.
         # (For format conversions output can legitimately be smaller,
         #  e.g. a large WAV → MP3, so we use a very conservative 1 %.)
-        suspicious = (inp_sz > 0 and out_sz < inp_sz * 0.01
-                      and out_sz < 512 * 1024)   # also cap at 512 KB
+        suspicious = (
+            out_ext in _VIDEO_OUTPUT_EXTS
+            and inp_sz > 0
+            and out_sz < inp_sz * 0.01
+            and out_sz < 512 * 1024
+        )   # also cap at 512 KB
 
         if suspicious:
             try:
@@ -295,10 +340,15 @@ class FFmpegHandler(QObject):
                     last_lines.append(line)
                     if len(last_lines) > 40:
                         last_lines.pop(0)
-                    kind = "warn" if re.search(
+                    if _is_progress_line(line):
+                        kind = "progress"
+                    elif re.search(
                         r"\b(error|failed|invalid|cannot|unable|not found)\b",
                         line, re.IGNORECASE
-                    ) else "meta"
+                    ):
+                        kind = "warn"
+                    else:
+                        kind = "meta"
                     self.log_line.emit(idx, kind, line[:2000])
 
                 proc.wait()

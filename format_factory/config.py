@@ -1,7 +1,7 @@
 ﻿import os
 import platform
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FFMPEG_DIR = os.path.join(BASE_DIR, "FFmpeg")
 FFMPEG_BIN_DIR = os.path.join(FFMPEG_DIR, "bin")
@@ -46,13 +46,15 @@ def get_ffmpeg_download_spec() -> dict:
     machine = _normalized_machine()
 
     if system == "Windows":
-        asset = "ffmpeg-master-latest-winarm64-gpl.zip" if machine == "arm64" else "ffmpeg-master-latest-win64-gpl.zip"
         return {
             "platform": system,
-            "downloads": [{
-                "url": f"https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/{asset}",
-                "filename": asset,
-            }],
+            "resolver": "btbn_latest_release",
+            "repo_api": "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest",
+            "asset_filters": {
+                "include": ["winarm64", "gpl", ".zip"] if machine == "arm64" else ["win64", "gpl", ".zip"],
+                "exclude": ["shared", "lgpl", "nonfree"],
+            },
+            "downloads": [],
         }
 
     if system == "Linux":
@@ -122,6 +124,24 @@ VIDEO_FORMATS = ["mp4", "m4a", "mkv", "avi", "mov", "webm", "flv", "gif", "m3u8"
 AUDIO_FORMATS = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
 IMAGE_FORMATS = ["jpg", "png", "webp", "bmp", "tiff", "ico"]
 M3U8_OUTPUT_FORMATS = ["mp4", "mkv", "avi", "mov", "webm"]
+
+VIDEO_INPUT_EXTENSIONS = [
+    "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg",
+    "ts", "m2ts", "mts", "mxf", "vob", "3gp", "3g2", "asf", "ogv", "f4v",
+    "rm", "rmvb", "divx", "dv", "h264", "h265", "hevc", "nut", "mod", "tod",
+]
+
+AUDIO_INPUT_EXTENSIONS = [
+    "mp3", "wav", "aac", "flac", "ogg", "m4a", "opus", "ncm", "wma", "aiff",
+    "aif", "ape", "alac", "ac3", "dts", "amr", "mka", "caf", "au", "mp2",
+    "ra", "tta", "tak",
+]
+
+IMAGE_INPUT_EXTENSIONS = [
+    "jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp", "ico", "gif", "avif",
+    "heic", "heif", "jxl", "ppm", "pgm", "pbm", "pam", "tga", "dds", "hdr",
+    "exr", "svg",
+]
 
 DEFAULT_FFMPEG_ARGS = {
     "video": {

@@ -1,6 +1,8 @@
-﻿# format_factory/gui_pages/image_converter.py
+# format_factory/gui/image_converter.py
 import os
 from .base_page import BaseConverterPage
+from ..config import IMAGE_INPUT_EXTENSIONS
+from ..i18n import tr
 
 
 class ImageConverterPage(BaseConverterPage):
@@ -11,11 +13,14 @@ class ImageConverterPage(BaseConverterPage):
         super().__init__("image", ffmpeg_handler, parent)
 
     def _get_file_filter(self):
-        return "图片文件 (*.jpg *.jpeg *.png *.bmp *.tiff *.webp *.ico);;所有文件 (*.*)"
+        img_label = tr(self._language, "file_filter_image")
+        all_label = tr(self._language, "file_filter_all")
+        patterns = " ".join(f"*.{ext}" for ext in IMAGE_INPUT_EXTENSIONS)
+        return f"{img_label} ({patterns});;{all_label} (*.*)"
 
     def _start_conversion_process(self):
         if not self.ffmpeg_handler:
-            self.log_message("未找到 FFmpeg，请到设置下载", "error")
+            self.log_message(tr(self._language, "ffmpeg_not_found_download"), "error")
             self.start_conversion_button.setEnabled(True)
             self.cancel_conversion_button.setEnabled(False)
             return
@@ -53,14 +58,16 @@ class ImageConverterPage(BaseConverterPage):
             return args
 
         if max_dim <= 0:
-            self.log_message(f"{os.path.basename(inp)} 尺寸未知，无法为 ICO 自动压缩。", "warning")
+            self.log_message(
+                tr(self._language, "log_image_dim_unknown", name=os.path.basename(inp)),
+                "warning")
             return args
 
         if not target:
             target = 256
 
         self.log_message(
-            f"{os.path.basename(inp)} 过大，已自动按 {target}x{target} 无损尺寸缩放后再生成 ICO。",
+            tr(self._language, "log_image_too_large", name=os.path.basename(inp), dim=target),
             "warning",
         )
         new_args = []

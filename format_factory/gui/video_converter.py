@@ -1,6 +1,8 @@
-﻿# format_factory/gui_pages/video_converter.py
+# format_factory/gui/video_converter.py
 import os
 from .base_page import BaseConverterPage
+from ..config import VIDEO_INPUT_EXTENSIONS
+from ..i18n import tr
 
 
 class VideoConverterPage(BaseConverterPage):
@@ -8,11 +10,14 @@ class VideoConverterPage(BaseConverterPage):
         super().__init__('video', ffmpeg_handler, parent)
 
     def _get_file_filter(self):
-        return "视频文件 (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm);;所有文件 (*.*)"
+        video_label = tr(self._language, "file_filter_video")
+        all_label = tr(self._language, "file_filter_all")
+        patterns = " ".join(f"*.{ext}" for ext in VIDEO_INPUT_EXTENSIONS)
+        return f"{video_label} ({patterns});;{all_label} (*.*)"
 
     def _start_conversion_process(self):
         if not self.ffmpeg_handler:
-            self.log_message("未找到 FFmpeg，请到设置下载", "error")
+            self.log_message(tr(self._language, "ffmpeg_not_found_download"), "error")
             self.start_conversion_button.setEnabled(True)
             self.cancel_conversion_button.setEnabled(False)
             return

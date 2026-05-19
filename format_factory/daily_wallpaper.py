@@ -19,6 +19,7 @@ import urllib.parse
 from datetime import date, datetime, timedelta
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThread
+from .net_utils import open_url
 
 
 # ── 缓存路径 ──────────────────────────────────────────────────────────
@@ -30,6 +31,7 @@ _TIMEOUT   = 15  # 秒
 _SUPPORTED_REFRESH_DAYS = {1, 2, 3, 4, 5, 6, 7}
 _MANUAL_REFRESH = "manual"
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"}
+_ALLOW_INSECURE_TLS_RETRY = True
 _CONTENT_TYPE_TO_EXT = {
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
@@ -258,7 +260,7 @@ class _FetchThread(QThread):
             req = urllib.request.Request(
                 self._api_url,
                 headers={"User-Agent": "Mozilla/5.0 FormatFactory/2.1"})
-            with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            with open_url(req, _TIMEOUT, allow_insecure_retry=_ALLOW_INSECURE_TLS_RETRY) as resp:
                 content_type = str(resp.headers.get("Content-Type", "") or "")
                 final_url = str(resp.geturl() or self._api_url)
                 raw_bytes = resp.read()
@@ -311,7 +313,7 @@ class _FetchThread(QThread):
                 req2 = urllib.request.Request(
                     safe_url,
                     headers={"User-Agent": "Mozilla/5.0 FormatFactory/2.1"})
-                with urllib.request.urlopen(req2, timeout=_TIMEOUT) as resp2:
+                with open_url(req2, _TIMEOUT, allow_insecure_retry=_ALLOW_INSECURE_TLS_RETRY) as resp2:
                     raw_bytes = resp2.read()
             else:
                 raw_bytes = image_bytes

@@ -1,6 +1,6 @@
-﻿# format_factory/gui_pages/settings_page.py
+﻿# format_factory/gui/settings_page.py
 """
-设置页  —  手动选择 GPU 厂商（无自动检测），双列布局。
+设置页  —  手动选择 GPU 厂商，双列布局。
 """
 import os
 import webbrowser
@@ -83,7 +83,7 @@ class SettingsPage(QWidget):
                  parent=None):
         super().__init__(parent)
         self._theme        = current_theme
-        self._blur         = current_blur          # 0-20
+        self._blur         = max(0, min(50, int(current_blur)))  # 0-50
         self._mask_opacity = mask_opacity          # 背景图片透明度
         self._bg_path      = current_bg
         self._bg_fill_mode = current_bg_fill_mode
@@ -93,7 +93,7 @@ class SettingsPage(QWidget):
         self._daily_enabled = daily_enabled
         self._daily_api_url = str(daily_api_url or "").strip()
         self._daily_refresh_days = daily_refresh_days if daily_refresh_days in {1, 2, 3, 4, 5, 6, 7, "manual"} else 1
-        self._ffmpeg_action = "下载"
+        self._ffmpeg_action = "download"
         self._language     = current_language or LANG_AUTO
         self._update_status_overridden = False
         self._ffmpeg_status_overridden = False
@@ -122,6 +122,13 @@ class SettingsPage(QWidget):
 
     def current_vendor(self) -> str:
         return self._vendor
+
+    def _refresh_days_text(self, value) -> str:
+        if value == "manual":
+            return tr(self._language, "settings_never")
+        count = int(value)
+        key = "settings_day_singular" if count == 1 else "settings_day_plural"
+        return tr(self._language, key, count=count)
 
     # ── UI ───────────────────────────────────────────────────────────
     def _init_ui(self):
@@ -229,19 +236,19 @@ class SettingsPage(QWidget):
 
         lay.addWidget(self._div())
 
-        # 毛玻璃模糊强度（滑块 0-20）
+        # 毛玻璃模糊强度（滑块 0-50）
         self._blur_row_lbl = self._row_label("毛玻璃模糊")
         lay.addWidget(self._blur_row_lbl)
         blur_row = QHBoxLayout(); blur_row.setSpacing(8); blur_row.setContentsMargins(0,0,0,0)
         self.blur_slider = QSlider(Qt.Orientation.Horizontal)
         self.blur_slider.setMinimum(0)
-        self.blur_slider.setMaximum(20)
+        self.blur_slider.setMaximum(50)
         self.blur_slider.setValue(self._blur)
-        self.blur_slider.setTickInterval(5)
+        self.blur_slider.setTickInterval(10)
         self.blur_slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.blur_val_lbl = QLabel(f"{self._blur}")
+        self.blur_val_lbl = QLabel(f"{self._blur}px")
         self.blur_val_lbl.setObjectName("section_title")
-        self.blur_val_lbl.setFixedWidth(28)
+        self.blur_val_lbl.setFixedWidth(44)
         self.blur_val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.blur_hint = QLabel("需先设置背景图")
         self.blur_hint.setObjectName("section_title")
@@ -360,14 +367,8 @@ class SettingsPage(QWidget):
         self._daily_refresh_days_lbl = QLabel("刷新天数")
         self._daily_refresh_days_lbl.setObjectName("section_title")
         self.daily_refresh_days_combo = NoWheelComboBox()
-        self.daily_refresh_days_combo.addItem("1 天", 1)
-        self.daily_refresh_days_combo.addItem("2 天", 2)
-        self.daily_refresh_days_combo.addItem("3 天", 3)
-        self.daily_refresh_days_combo.addItem("4 天", 4)
-        self.daily_refresh_days_combo.addItem("5 天", 5)
-        self.daily_refresh_days_combo.addItem("6 天", 6)
-        self.daily_refresh_days_combo.addItem("7 天", 7)
-        self.daily_refresh_days_combo.addItem("永久", "manual")
+        for value in (1, 2, 3, 4, 5, 6, 7, "manual"):
+            self.daily_refresh_days_combo.addItem(self._refresh_days_text(value), value)
         idx = self.daily_refresh_days_combo.findData(self._daily_refresh_days)
         self.daily_refresh_days_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.daily_refresh_days_combo.currentIndexChanged.connect(self._on_daily_refresh_days_changed)
@@ -407,7 +408,8 @@ class SettingsPage(QWidget):
         lay.addWidget(self._div())
 
         # 四个厂商按钮
-        lay.addWidget(self._row_label("选择 GPU 厂商"))
+        self._gpu_vendor_choose_lbl = self._row_label("选择 GPU 厂商")
+        lay.addWidget(self._gpu_vendor_choose_lbl)
 
         # 上排：NVIDIA  AMD
         row_a = QHBoxLayout(); row_a.setSpacing(8); row_a.setContentsMargins(0,0,0,0)
@@ -444,11 +446,13 @@ class SettingsPage(QWidget):
 
         self._enc_h264_lbl = QLabel("—")
         self._enc_hevc_lbl = QLabel("—")
-        for col, (k, v) in enumerate(
-                [("H.264 编码器", self._enc_h264_lbl),
-                 ("H.265 编码器", self._enc_hevc_lbl)]):
+        self._enc_h264_title = QLabel("H.264 编码器")
+        self._enc_hevc_title = QLabel("H.265 编码器")
+        for col, (lbl, v) in enumerate(
+                [(self._enc_h264_title, self._enc_h264_lbl),
+                 (self._enc_hevc_title, self._enc_hevc_lbl)]):
             r = col
-            lbl = QLabel(k); lbl.setObjectName("section_title")
+            lbl.setObjectName("section_title")
             enc_grid.addWidget(lbl, r, 0)
             enc_grid.addWidget(v,   r, 1)
 
@@ -677,8 +681,10 @@ class SettingsPage(QWidget):
 
     def _choose_bg(self):
         p, _ = QFileDialog.getOpenFileName(
-            self, "选择背景图片", "",
-            "图片文件 (*.jpg *.jpeg *.png *.bmp *.webp);;所有文件 (*.*)")
+            self,
+            tr(self._language, "settings_bg_image_dialog_title"),
+            "",
+            tr(self._language, "settings_bg_image_filter"))
         if p:
             self._bg_path = p
             self.bg_lbl.setText(os.path.basename(p))
@@ -686,13 +692,13 @@ class SettingsPage(QWidget):
 
     def _clear_bg(self):
         self._bg_path = ""
-        self.bg_lbl.setText("未设置")
+        self.bg_lbl.setText(tr(self._language, "settings_not_set"))
         self.bg_image_changed.emit("")
         self.bg_clear_requested.emit()   # 通知 MainWindow 同时关闭每日壁纸
 
     def _on_blur(self, val: int):
         self._blur = val
-        self.blur_val_lbl.setText(f"{val}")
+        self.blur_val_lbl.setText(f"{val}px")
         self.blur_changed.emit(val)
 
     def _on_mask_opacity(self, val: int):
@@ -735,9 +741,9 @@ class SettingsPage(QWidget):
         normalized, err = normalize_custom_api_url(value)
         if value and err:
             if err == "multiple_links":
-                self.set_daily_status("❌ 壁纸 API 只能填写一个链接，不能包含空格或多个地址。")
+                self.set_daily_status(tr(self._language, "daily_api_multiple_links"))
             else:
-                self.set_daily_status("❌ 壁纸 API 格式无效，请输入单个 http/https 链接。")
+                self.set_daily_status(tr(self._language, "daily_api_invalid"))
             self.daily_api_edit.blockSignals(True)
             self.daily_api_edit.setText(self._daily_api_url)
             self.daily_api_edit.blockSignals(False)
@@ -883,6 +889,8 @@ class SettingsPage(QWidget):
         if hasattr(self, "clear_btn"):
             self.clear_btn.setText(tr(lang, "clear_image"))
             self.clear_btn.setToolTip(tr(lang, "clear_image_tip"))
+        if hasattr(self, "bg_lbl") and not self._bg_path:
+            self.bg_lbl.setText(tr(lang, "settings_not_set"))
         if hasattr(self, "mode_lbl"):
             self.mode_lbl.setText(tr(lang, "bg_fill_mode_label"))
         if hasattr(self, "bg_fill_mode_combo"):
@@ -901,37 +909,33 @@ class SettingsPage(QWidget):
         if hasattr(self, "daily_info"):
             self.daily_info.setText(tr(lang, "daily_wallpaper_info"))
         if hasattr(self, "_daily_api_row_lbl"):
-            self._daily_api_row_lbl.setText("壁纸 API" if lang != LANG_EN else "Wallpaper API")
+            self._daily_api_row_lbl.setText(tr(lang, "settings_wallpaper_api"))
         if hasattr(self, "daily_api_edit"):
             self.daily_api_edit.setPlaceholderText(
                 "https://example.com/wallpaper-api"
                 if lang == LANG_EN else "https://example.com/wallpaper-api"
             )
         if hasattr(self, "_daily_refresh_days_lbl"):
-            self._daily_refresh_days_lbl.setText("刷新天数" if lang != LANG_EN else "Refresh days")
+            self._daily_refresh_days_lbl.setText(tr(lang, "settings_refresh_days"))
         if hasattr(self, "daily_refresh_days_combo"):
             current = self._daily_refresh_days
-            items = [
-                ("1 天" if lang != LANG_EN else "1 day", 1),
-                ("2 天" if lang != LANG_EN else "2 days", 2),
-                ("3 天" if lang != LANG_EN else "3 days", 3),
-                ("4 天" if lang != LANG_EN else "4 days", 4),
-                ("5 天" if lang != LANG_EN else "5 days", 5),
-                ("6 天" if lang != LANG_EN else "6 days", 6),
-                ("7 天" if lang != LANG_EN else "7 days", 7),
-                ("永久" if lang != LANG_EN else "Permanent", "manual"),
-            ]
             self.daily_refresh_days_combo.blockSignals(True)
             self.daily_refresh_days_combo.clear()
-            for text, value in items:
-                self.daily_refresh_days_combo.addItem(text, value)
+            for value in (1, 2, 3, 4, 5, 6, 7, "manual"):
+                self.daily_refresh_days_combo.addItem(self._refresh_days_text(value), value)
             idx = self.daily_refresh_days_combo.findData(current)
             self.daily_refresh_days_combo.setCurrentIndex(idx if idx >= 0 else 0)
             self.daily_refresh_days_combo.blockSignals(False)
         if hasattr(self, "_project_link_hint"):
-            self._project_link_hint.setText("项目地址" if lang != LANG_EN else "Project")
+            self._project_link_hint.setText(tr(lang, "settings_project_url"))
         if hasattr(self, "_project_link_btn"):
             self._project_link_btn.setToolTip(PROJECT_URL)
+        if hasattr(self, "_gpu_vendor_choose_lbl"):
+            self._gpu_vendor_choose_lbl.setText(tr(lang, "settings_gpu_vendor_choose"))
+        if hasattr(self, "_enc_h264_title"):
+            self._enc_h264_title.setText(tr(lang, "settings_gpu_h264_encoder"))
+        if hasattr(self, "_enc_hevc_title"):
+            self._enc_hevc_title.setText(tr(lang, "settings_gpu_h265_encoder"))
         self._refresh_daily_ui()
         self._refresh_daily_controls_visibility()
         if hasattr(self, "_gpu_section"):
@@ -956,11 +960,11 @@ class SettingsPage(QWidget):
             self._ffmpeg_status_lbl.setText(tr(lang, "ffmpeg_status_checking"))
         if hasattr(self, "_download_ffmpeg_btn"):
             self._download_ffmpeg_btn.setText(
-                tr(lang, "ffmpeg_update") if self._ffmpeg_action == "更新"
+                tr(lang, "ffmpeg_update") if self._ffmpeg_action == "update"
                 else tr(lang, "ffmpeg_download"))
         if hasattr(self, "_ffmpeg_hint_lbl"):
             self._ffmpeg_hint_lbl.setText(
-                tr(lang, "ffmpeg_hint_update") if self._ffmpeg_action == "更新"
+                tr(lang, "ffmpeg_hint_update") if self._ffmpeg_action == "update"
                 else tr(lang, "ffmpeg_hint_download"))
 
     # ── 更新事件 ─────────────────────────────────────────────────────
@@ -979,25 +983,26 @@ class SettingsPage(QWidget):
         )
 
     def set_ffmpeg_action(self, action: str):
-        self._ffmpeg_action = action if action in {"下载", "更新"} else "下载"
+        self._ffmpeg_action = action if action in {"download", "update"} else "download"
         if hasattr(self, "_download_ffmpeg_btn"):
             self._download_ffmpeg_btn.setText(
                 tr(self._language, "ffmpeg_update")
-                if self._ffmpeg_action == "更新" else tr(self._language, "ffmpeg_download"))
+                if self._ffmpeg_action == "update" else tr(self._language, "ffmpeg_download"))
         if hasattr(self, "_ffmpeg_hint_lbl"):
-            if self._ffmpeg_action == "更新":
+            if self._ffmpeg_action == "update":
                 self._ffmpeg_hint_lbl.setText(tr(self._language, "ffmpeg_hint_update"))
             else:
                 self._ffmpeg_hint_lbl.setText(tr(self._language, "ffmpeg_hint_download"))
 
     def _on_check_update(self):
         self._check_update_btn.setEnabled(False)
-        self._update_status_lbl.setText("正在检查更新…")
+        self._update_status_lbl.setText(tr(self._language, "update_checking"))
         self.check_update_requested.emit()
 
     def _on_download_ffmpeg(self):
         self._download_ffmpeg_btn.setEnabled(False)
-        self._ffmpeg_status_lbl.setText(f"正在准备{self._ffmpeg_action} FFmpeg…")
+        action = tr(self._language, "action_update") if self._ffmpeg_action == "update" else tr(self._language, "action_download")
+        self._ffmpeg_status_lbl.setText(tr(self._language, "ffmpeg_preparing", action=action))
         self.download_ffmpeg_requested.emit()
 
     def set_update_status(self, msg: str):
@@ -1023,9 +1028,9 @@ class SettingsPage(QWidget):
     def set_version_badge(self, has_update: bool, latest_ver: str = ""):
         """由 MainWindow 调用，在版本号旁边显示更新状态括号标注。"""
         if has_update:
-            self._about_badge = f"（<span style='color:#e67e22'>有新版本 v{latest_ver} 可更新</span>）"
+            self._about_badge = tr(self._language, "update_badge_new_version", version=latest_ver)
         else:
-            self._about_badge = "（<span style='color:#27ae60'>最新版</span>）"
+            self._about_badge = tr(self._language, "update_badge_latest")
         self._refresh_about_txt()
 
     def populate_versions(self, versions: list):

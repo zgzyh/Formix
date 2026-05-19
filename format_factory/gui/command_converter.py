@@ -7,29 +7,10 @@ from PyQt6.QtCore import QMimeData, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QDragEnterEvent, QDropEvent, QFont, QInputMethodEvent, QKeySequence, QTextCharFormat, QTextCursor
 from PyQt6.QtWidgets import QTextEdit, QVBoxLayout, QWidget
 
-from ..i18n import resolve_language, tr
+from ..i18n import command_ready_lines, resolve_language, tr
 
 
-TXT_INVALID = "Please enter an FFmpeg/FFplay/FFprobe command."
-TXT_ONLY_FFMPEG = "Only ffmpeg/ffplay/ffprobe commands are allowed."
-TXT_BAD_PARSE = "Failed to parse command."
-TXT_BLOCKED = (
-    "Shell control operators are not supported here. "
-    "Use a single ffmpeg/ffplay/ffprobe command, and quote them if they are part of an FFmpeg argument."
-)
-TXT_MISSING_FFMPEG = "FFmpeg not found. Please download it from Settings."
-TXT_MISSING_FFPROBE = "FFprobe not found. Please download it from Settings."
-TXT_MISSING_FFPLAY = "FFplay not found. Please download it from Settings."
-TXT_MISSING_SUITE = (
-    "FFmpeg is not installed. Please download the FFmpeg bundle from Settings first "
-    "(includes ffmpeg / ffplay / ffprobe)."
-)
-TXT_READY = (
-    "Formix 命令台\n"
-    "仅支持 ffmpeg / ffplay / ffprobe 命令。\n"
-    "回车执行，Ctrl+C 中断运行。\n"
-    "Ctrl+Enter 换行。\n"
-)
+
 BLOCKED_CHARS = {"|", "&", ";", ">", "<", "`"}
 
 COMMAND_DESCRIPTIONS = {
@@ -187,7 +168,7 @@ TEMPLATE_COMPLETIONS = [
 
 TERMINAL_SKINS = {
     "Windows": {
-        "title": "Formix 命令台",
+        "title": "Formix Terminal",
         "badge": "FFmpeg",
         "prompt": "formix ❯ ",
         "font": "Cascadia Mono",
@@ -203,7 +184,7 @@ TERMINAL_SKINS = {
         "selection": "rgba(96,165,250,0.35)",
     },
     "Darwin": {
-        "title": "Formix 命令台",
+        "title": "Formix Terminal",
         "badge": "FFmpeg",
         "prompt": "formix ❯ ",
         "font": "Menlo",
@@ -219,7 +200,7 @@ TERMINAL_SKINS = {
         "selection": "rgba(167,139,250,0.28)",
     },
     "Linux": {
-        "title": "Formix 命令台",
+        "title": "Formix Terminal",
         "badge": "FFmpeg",
         "prompt": "formix ❯ ",
         "font": "DejaVu Sans Mono",
@@ -446,16 +427,16 @@ class CommandConverterPage(QWidget):
         self._live_marker = None
         self._terminal_mode = True
         self._interrupt_requested = False
-        self._theme_text_color = "#151514"
-        self._theme_muted_color = "#4A4A49"
+        self._theme_text_color = "#1E1E2E"
+        self._theme_muted_color = "#5B6372"
         self._theme_accent_color = "#2563EB"
-        self._theme_info_color = "#1D4ED8"
+        self._theme_info_color = "#2563EB"
         self._theme_warn_color = "#B45309"
-        self._theme_error_color = "#B91C1C"
-        self._theme_success_color = "#15803D"
+        self._theme_error_color = "#DC2626"
+        self._theme_success_color = "#16A34A"
         self._theme_cmd_color = "#0F766E"
-        self._theme_meta_color = "#6D28D9"
-        self._theme_banner_color = "#111827"
+        self._theme_meta_color = "#7C3AED"
+        self._theme_banner_color = "#4338CA"
         self._refresh_terminal_strings()
         self._init_ui()
         self._connect_handler_signals()
@@ -495,16 +476,7 @@ class CommandConverterPage(QWidget):
         QTimer.singleShot(0, self.focus_terminal)
 
     def _command_ready_lines(self):
-        lang = resolve_language(self._language)
-        if lang == "zh_TW":
-            return ["Formix 終端", "僅支援 ffmpeg / ffplay / ffprobe 命令。", "按 Enter 執行，Ctrl+C 中斷執行。", "Ctrl+Enter 換行。"]
-        if lang == "en":
-            return ["Formix Terminal", "Only ffmpeg / ffplay / ffprobe commands are supported.", "Press Enter to run, Ctrl+C to stop.", "Ctrl+Enter for a new line."]
-        if lang == "ja":
-            return ["Formix ターミナル", "ffmpeg / ffplay / ffprobe コマンドのみ使用できます。", "Enter で実行、Ctrl+C で停止。", "Ctrl+Enter で改行。"]
-        if lang == "ko":
-            return ["Formix 터미널", "ffmpeg / ffplay / ffprobe 명령만 사용할 수 있습니다.", "Enter로 실행, Ctrl+C로 중단.", "Ctrl+Enter로 줄바꿈."]
-        return ["Formix 终端", "仅支持 ffmpeg / ffplay / ffprobe 命令。", "回车执行，Ctrl+C 中断运行。", "Ctrl+Enter 换行。"]
+        return command_ready_lines(self._language)
 
     def _make_format(self, color: str, bold: bool = False):
         fmt = QTextCharFormat()
@@ -533,11 +505,11 @@ class CommandConverterPage(QWidget):
     def _apply_terminal_style(self):
         skin = self._skin
         if self._is_dark:
-            text = "#F7D9B3"
-            muted = "#E5C7A7"
+            text = "#FFE7C2"
+            muted = "#D9C5A8"
             accent = "#FBBF24"
-            terminal_bg = "rgba(12,10,8,0.20)"
-            selection_bg = "rgba(251,191,36,0.24)"
+            terminal_bg = "rgba(12,10,8,0.40)"
+            selection_bg = "rgba(251,191,36,0.28)"
             self._theme_text_color = text
             self._theme_muted_color = muted
             self._theme_accent_color = accent
@@ -549,21 +521,21 @@ class CommandConverterPage(QWidget):
             self._theme_meta_color = "#C4B5FD"
             self._theme_banner_color = "#FFE08A"
         else:
-            text = "#111827"
-            muted = "#4B5563"
-            accent = "#0F172A"
-            terminal_bg = "rgba(255,255,255,0.72)"
-            selection_bg = "rgba(30,41,59,0.18)"
+            text = "#1E1E2E"
+            muted = "#5B6372"
+            accent = "#2563EB"
+            terminal_bg = "rgba(248,248,252,0.50)"
+            selection_bg = "rgba(37,99,235,0.18)"
             self._theme_text_color = text
             self._theme_muted_color = muted
             self._theme_accent_color = accent
-            self._theme_info_color = "#1D4ED8"
-            self._theme_warn_color = "#9A3412"
-            self._theme_error_color = "#B91C1C"
-            self._theme_success_color = "#15803D"
-            self._theme_cmd_color = "#0F172A"
-            self._theme_meta_color = "#6D28D9"
-            self._theme_banner_color = "#0F172A"
+            self._theme_info_color = "#2563EB"
+            self._theme_warn_color = "#B45309"
+            self._theme_error_color = "#DC2626"
+            self._theme_success_color = "#16A34A"
+            self._theme_cmd_color = "#0F766E"
+            self._theme_meta_color = "#7C3AED"
+            self._theme_banner_color = "#4338CA"
         self.setStyleSheet(
             f"""
 QWidget {{
@@ -728,64 +700,51 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
         self._move_cursor_to_end()
 
     def _external_busy_reason(self) -> str:
-        window = self.window()
-        if window is None:
-            return ""
-        handler = self.ffmpeg_handler
-        if self._active or (handler is not None and getattr(handler, "is_busy", None) and handler.is_busy()):
-            active_page = getattr(window, "_active_ffmpeg_page", lambda: None)()
-            if active_page is not None and active_page is not self:
-                return "当前已有转换任务在运行，请等待完成或先取消后再执行命令。"
-        if hasattr(window, "command_page_busy_reason"):
-            try:
-                return window.command_page_busy_reason(self) or ""
-            except TypeError:
-                return window.command_page_busy_reason() or ""
         return ""
 
     def _missing_tool_message(self, tool: str) -> str:
         handler = self.ffmpeg_handler
         if handler is None:
-            return TXT_MISSING_SUITE
+            return tr(self._language, "cmd_missing_suite")
 
         ffmpeg_path = getattr(handler, "ffmpeg_path", "")
         ffprobe_path = getattr(handler, "ffprobe_path", "")
         ffplay_path = getattr(handler, "ffplay_path", "")
         if not any((ffmpeg_path, ffprobe_path, ffplay_path)):
-            return TXT_MISSING_SUITE
+            return tr(self._language, "cmd_missing_suite")
 
         tool = (tool or "ffmpeg").lower()
         if tool == "ffplay":
             if not ffplay_path:
                 if ffmpeg_path or ffprobe_path:
                     return "FFmpeg is installed, but FFplay is missing. Please re-download the FFmpeg bundle from Settings."
-                return TXT_MISSING_SUITE
+                return tr(self._language, "cmd_missing_suite")
             return ""
         if tool == "ffprobe":
             if not ffprobe_path:
                 if ffmpeg_path or ffplay_path:
                     return "FFmpeg is installed, but FFprobe is missing. Please re-download the FFmpeg bundle from Settings."
-                return TXT_MISSING_SUITE
+                return tr(self._language, "cmd_missing_suite")
             return ""
         if not ffmpeg_path:
             if ffprobe_path or ffplay_path:
                 return "FFmpeg is installed incompletely. The ffmpeg executable is missing. Please re-download the FFmpeg bundle from Settings."
-            return TXT_MISSING_SUITE
+            return tr(self._language, "cmd_missing_suite")
         return ""
 
     def _append_terminal_text(self, text: str, ensure_newline: bool = True, kind: str = "text"):
         follow_output, scroll_value, view_cursor = self._capture_view_state()
         cursor = QTextCursor(self.terminal.document())
         active_marker = self._progress_marker if kind == "progress" else self._live_marker if kind == "live" else None
-        insert_before_progress = (
-            self._progress_marker is not None
+        tail_marker = self._live_marker or self._progress_marker
+        insert_before_tail = (
+            tail_marker is not None
             and kind != "progress"
             and kind != "live"
             and self._active
-            and self._current_tool == "ffmpeg"
         )
-        if insert_before_progress:
-            cursor.setPosition(self._progress_marker["start"])
+        if insert_before_tail:
+            cursor.setPosition(tail_marker["start"])
         elif active_marker is not None:
             cursor.setPosition(active_marker["start"])
             cursor.setPosition(active_marker["end"], QTextCursor.MoveMode.KeepAnchor)
@@ -806,8 +765,8 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 "ensure_newline": ensure_newline,
                 "kind": kind,
             }
-            if insert_before_progress and self._progress_marker is not None:
-                history_idx = self._progress_marker["history_idx"]
+            if insert_before_tail and tail_marker is not None:
+                history_idx = tail_marker["history_idx"]
                 if history_idx is None:
                     history_idx = len(self._terminal_history)
                 self._terminal_history.insert(history_idx, event)
@@ -823,12 +782,16 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             else:
                 history_idx = len(self._terminal_history)
                 self._terminal_history.append(event)
-        if insert_before_progress and self._progress_marker is not None:
+        if insert_before_tail and tail_marker is not None:
             delta = end - start
-            self._progress_marker["start"] += delta
-            self._progress_marker["end"] += delta
-            if self._progress_marker["history_idx"] is not None:
-                self._progress_marker["history_idx"] += 1
+            for marker in (self._progress_marker, self._live_marker):
+                if marker is None:
+                    continue
+                if marker["start"] >= start:
+                    marker["start"] += delta
+                    marker["end"] += delta
+                    if marker["history_idx"] is not None:
+                        marker["history_idx"] += 1
         self._restore_view_state(follow_output, scroll_value, view_cursor)
         return {"start": start, "end": end, "history_idx": history_idx}
 
@@ -890,9 +853,15 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             return True
         if re.match(r"^\s*frame=\s*\d+", s):
             return True
-        if re.match(r"^\s*\d+(?:\.\d+)?\s+A-V:", s):
+        if re.search(r"\b(?:size|time|bitrate|speed|fps)\s*=", s) and (
+            "time=" in s or "speed=" in s or "fps=" in s
+        ):
             return True
-        if all(token in s for token in ("A-V:", "fd=", "aq=", "vq=", "sq=")):
+        if re.search(r"\b(?:out_time|out_time_ms|out_time_us|total_size|dup_frames|drop_frames|progress)\s*=", s):
+            return True
+        # GPU encoder status: "86.41 M-A: 0.000 fd= 0 aq= 416KB vq= 0KB sq= 0B"
+        # NVENC uses "A-V:", AMF uses "M-A:", QSV uses other prefixes
+        if all(token in s for token in ("fd=", "aq=", "vq=", "sq=")):
             return True
         return False
 
@@ -966,11 +935,11 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 
     def _tokenize_command(self, raw: str):
         if not raw:
-            return [], TXT_INVALID
+            return [], tr(self._language, "cmd_invalid")
         try:
             tokens = self._parse_command_tokens(raw)
         except ValueError:
-            return [], TXT_BAD_PARSE
+            return [], tr(self._language, "cmd_bad_parse")
         return tokens, ""
 
     @staticmethod
@@ -1049,17 +1018,17 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 
     def _validate_command(self, raw: str):
         if not raw:
-            return False, TXT_INVALID
+            return False, tr(self._language, "cmd_invalid")
         if self._has_unquoted_shell_operator(raw):
-            return False, TXT_BLOCKED
+            return False, tr(self._language, "cmd_blocked")
         tokens, err = self._tokenize_command(raw)
         if err:
             return False, err
         if not tokens:
-            return False, TXT_INVALID
+            return False, tr(self._language, "cmd_invalid")
         exe = os.path.basename(tokens[0]).lower()
         if exe not in {"ffmpeg", "ffmpeg.exe", "ffplay", "ffplay.exe", "ffprobe", "ffprobe.exe"}:
-            return False, TXT_ONLY_FFMPEG
+            return False, tr(self._language, "cmd_only_ffmpeg")
         return True, ""
 
     def _value_after(self, tokens, option):
@@ -1117,7 +1086,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 
         if not self.ffmpeg_handler:
             self._pending_command = ""
-            self._append_terminal_text("\n" + TXT_MISSING_SUITE, kind="error")
+            self._append_terminal_text("\n" + tr(self._language, "cmd_missing_suite"), kind="error")
             self._append_prompt()
             self._prompt_pos = len(self.terminal.toPlainText())
             return
