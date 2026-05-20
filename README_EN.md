@@ -387,3 +387,9 @@ Main dependencies:
 ## 14. Document Notes
 
 - This document describes the current version of the app.
+
+## 15. License
+
+- This project is currently licensed under [GPL-3.0](LICENSE).
+- See the full license text in the root [LICENSE](LICENSE) file.
+- Because the project depends on FFmpeg, please also comply with FFmpeg and any related third-party license requirements when redistributing the application.

@@ -329,6 +329,29 @@ class BaseConverterPage(QWidget):
     def _get_file_filter(self):
         return f"{tr(self._language, 'all_files')} (*.*)"
 
+    def build_output_path(self, input_path: str, output_fmt: str) -> str:
+        stem = os.path.splitext(os.path.basename(input_path))[0]
+        ext = f".{str(output_fmt or '').lstrip('.')}"
+        out_dir = self.output_dir or os.path.dirname(input_path)
+        candidate_name = f"{stem}{ext}"
+        candidate_path = os.path.join(out_dir, candidate_name)
+        input_abs = os.path.normcase(os.path.abspath(input_path))
+        candidate_abs = os.path.normcase(os.path.abspath(candidate_path))
+
+        if candidate_abs != input_abs and not os.path.exists(candidate_path):
+            return candidate_name
+
+        index = 1
+        while index <= 999:
+            numbered_name = f"{stem}_{index:03d}{ext}"
+            numbered_path = os.path.join(out_dir, numbered_name)
+            numbered_abs = os.path.normcase(os.path.abspath(numbered_path))
+            if numbered_abs != input_abs and not os.path.exists(numbered_path):
+                return numbered_name
+            index += 1
+
+        return f"{stem}_{999:03d}{ext}"
+
     def _is_supported_input_path(self, path: str) -> bool:
         if not path or not os.path.isfile(path):
             return False

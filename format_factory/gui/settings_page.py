@@ -1,4 +1,4 @@
-﻿# format_factory/gui/settings_page.py
+# format_factory/gui/settings_page.py
 """
 设置页  —  手动选择 GPU 厂商，双列布局。
 """

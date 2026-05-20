@@ -1,4 +1,4 @@
-﻿# format_factory/theme.py
+# format_factory/theme.py
 """
 统一样式表。
   • 亮/暗两套基础色盘
@@ -6,8 +6,66 @@
   • GPU 厂商按钮：四种颜色（NVIDIA 绿 / AMD 红 / Intel 蓝 / 不使用灰）
   • 所有控件尺寸、间距、圆角统一收口
 """
+import platform
 
 BLUR_LEVELS = {"无": 0, "一点点": 1, "中度": 2, "重度": 3}
+
+PLATFORM_STYLE_PRESETS = {
+    "Windows": {
+        "app_font": '"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Segoe UI",sans-serif',
+        "mono_font": '"Consolas","Cascadia Code","Courier New",monospace',
+        "card_radius": 12,
+        "tabbar_radius": 14,
+        "tab_radius": 8,
+        "btn_radius": 7,
+        "input_radius": 7,
+        "list_radius": 10,
+        "item_radius": 6,
+        "progress_radius": 6,
+        "tooltip_radius": 6,
+        "gpu_btn_radius": 8,
+        "icon_btn_radius": 16,
+        "status_pad": "3px 14px",
+        "tab_pad": "8px 20px",
+        "button_pad": "4px 14px",
+    },
+    "Linux": {
+        "app_font": '"Noto Sans","Ubuntu","Cantarell","DejaVu Sans","PingFang SC",sans-serif',
+        "mono_font": '"JetBrains Mono","Noto Sans Mono","DejaVu Sans Mono","Liberation Mono",monospace',
+        "card_radius": 10,
+        "tabbar_radius": 12,
+        "tab_radius": 7,
+        "btn_radius": 6,
+        "input_radius": 6,
+        "list_radius": 8,
+        "item_radius": 5,
+        "progress_radius": 5,
+        "tooltip_radius": 5,
+        "gpu_btn_radius": 7,
+        "icon_btn_radius": 14,
+        "status_pad": "4px 14px",
+        "tab_pad": "7px 18px",
+        "button_pad": "4px 13px",
+    },
+    "Darwin": {
+        "app_font": '"SF Pro Text","Helvetica Neue","PingFang SC","Hiragino Sans GB",sans-serif',
+        "mono_font": '"SF Mono","Menlo","Monaco","Courier New",monospace',
+        "card_radius": 15,
+        "tabbar_radius": 16,
+        "tab_radius": 10,
+        "btn_radius": 9,
+        "input_radius": 9,
+        "list_radius": 12,
+        "item_radius": 8,
+        "progress_radius": 7,
+        "tooltip_radius": 8,
+        "gpu_btn_radius": 10,
+        "icon_btn_radius": 18,
+        "status_pad": "5px 16px",
+        "tab_pad": "9px 22px",
+        "button_pad": "5px 15px",
+    },
+}
 
 # ─── Light ─────────────────────────────────────────────────────────
 LIGHT_THEME = {
@@ -161,14 +219,21 @@ def _apply_bg(t: dict, theme_name: str, bg: dict) -> dict:
     return o
 
 
+def _platform_style(platform_name: str | None = None) -> dict:
+    name = platform_name or platform.system()
+    return PLATFORM_STYLE_PRESETS.get(name, PLATFORM_STYLE_PRESETS["Windows"])
+
+
 def build_stylesheet(theme: dict,
                      theme_name: str = "light",
                      has_bg: bool = False,
-                     bg_colors: dict = None) -> str:
+                     bg_colors: dict = None,
+                     platform_name: str | None = None) -> str:
     if bg_colors is None:
         bg_colors = {}
 
     t       = _apply_bg(theme, theme_name, bg_colors) if has_bg else theme
+    p       = _platform_style(platform_name)
     if theme_name == "dark":
         t["tp"] = "#FFFFFF"
         t["ts"] = "#F3F4F6"
@@ -187,8 +252,7 @@ def build_stylesheet(theme: dict,
 /* ══ Window ══════════════════════════════════════════════════════ */
 QMainWindow {{ background-color: {t["window_bg"]}; }}
 QMainWindow > QWidget {{ background-color: {t["window_bg"]}; }}
-QWidget {{ color:{tp}; font-family:"Microsoft YaHei UI","Microsoft YaHei",
-           "PingFang SC","Segoe UI",sans-serif;
+QWidget {{ color:{tp}; font-family:{p["app_font"]};
            font-size:13px; font-weight:500; background:transparent; }}
 
 /* ══ Tab bar ══════════════════════════════════════════════════════ */
@@ -205,14 +269,14 @@ QTabWidget::pane {{ border:none; background:transparent; padding-top:8px; }}
 QTabBar {{
     background:{card_bg};
     border:1px solid {cb};
-    border-radius:14px;
+    border-radius:{p["tabbar_radius"]}px;
     padding:6px;
     qproperty-drawBase:0;
 }}
 QTabBar::tab {{
     background:transparent; color:{tp};
-    padding:8px 20px; margin:0 4px 0 0;
-    border-radius:8px; font-weight:700; font-size:13px;
+    padding:{p["tab_pad"]}; margin:0 4px 0 0;
+    border-radius:{p["tab_radius"]}px; font-weight:700; font-size:13px;
     min-width:68px; min-height:22px; border:1px solid transparent;
 }}
 QTabBar::tab:selected {{
@@ -226,7 +290,7 @@ QTabBar::tab:last {{
 
 /* ══ Cards ════════════════════════════════════════════════════════ */
 QFrame#card {{
-    background:{card_bg}; border:1px solid {cb}; border-radius:12px;
+    background:{card_bg}; border:1px solid {cb}; border-radius:{p["card_radius"]}px;
 }}
 
 /* ══ Scroll Area ══════════════════════════════════════════════════ */
@@ -236,7 +300,7 @@ QScrollArea > QWidget > QWidget {{ background:transparent; }}
 /* ══ Buttons ══════════════════════════════════════════════════════ */
 QPushButton {{
     background:{bs}; color:{tp}; border:1px solid {cb};
-    border-radius:7px; padding:4px 14px;
+    border-radius:{p["btn_radius"]}px; padding:{p["button_pad"]};
     font-size:13px; font-weight:500;
     min-height:32px; min-width:72px;
 }}
@@ -248,6 +312,7 @@ QPushButton:disabled {{ background:transparent; color:{tm}; border:1px solid {cb
 QPushButton#primary {{
     background:{a}; color:#FFFFFF; border:none;
     font-weight:600; min-height:34px; min-width:110px; padding:6px 18px;
+    border-radius:{p["btn_radius"]}px;
 }}
 QPushButton#primary:hover   {{ background:{ah}; }}
 QPushButton#primary:pressed {{ background:{ap}; }}
@@ -257,6 +322,7 @@ QPushButton#primary:disabled {{ background:{t["prog_bg"]}; color:{tm}; border:no
 QPushButton#danger {{
     background:transparent; color:{t["error"]};
     border:1px solid {t["error"]}; min-width:60px; min-height:32px;
+    border-radius:{p["btn_radius"]}px;
 }}
 QPushButton#danger:hover    {{ background:{t["error"]}; color:#FFFFFF; }}
 QPushButton#danger:disabled {{ color:{tm}; border-color:{cb}; }}
@@ -266,7 +332,7 @@ QPushButton#toggle_light,
 QPushButton#toggle_dark,
 QPushButton#toggle_auto {{
     background:transparent; color:{ts}; border:1px solid {t_bdr};
-    border-radius:7px; font-weight:500;
+    border-radius:{p["btn_radius"]}px; font-weight:500;
     min-width:96px; min-height:32px;
 }}
 QPushButton#toggle_light:hover,
@@ -278,7 +344,7 @@ QPushButton#toggle_light_active,
 QPushButton#toggle_dark_active,
 QPushButton#toggle_auto_active {{
     background:{a}; color:#FFFFFF; border:none;
-    border-radius:7px; font-weight:600;
+    border-radius:{p["btn_radius"]}px; font-weight:600;
     min-width:96px; min-height:32px;
 }}
 QPushButton#toggle_light_active:hover,
@@ -291,7 +357,7 @@ QPushButton#toggle_auto_active:hover {{
 /* NVIDIA  inactive */
 QPushButton[objectName="vendor_btn_nvidia"] {{
     background:transparent; color:{ts}; border:1px solid {cb};
-    border-radius:8px; min-height:36px; font-weight:500;
+    border-radius:{p["gpu_btn_radius"]}px; min-height:36px; font-weight:500;
 }}
 QPushButton[objectName="vendor_btn_nvidia"]:hover {{
     border-color:#76b900; color:#76b900;
@@ -299,46 +365,46 @@ QPushButton[objectName="vendor_btn_nvidia"]:hover {{
 /* NVIDIA  active */
 QPushButton[objectName="vendor_btn_nvidia_active"] {{
     background:#76b900; color:#FFFFFF; border:none;
-    border-radius:8px; min-height:36px; font-weight:700;
+    border-radius:{p["gpu_btn_radius"]}px; min-height:36px; font-weight:700;
 }}
 QPushButton[objectName="vendor_btn_nvidia_active"]:hover {{ background:#68a300; }}
 
 /* AMD  inactive */
 QPushButton[objectName="vendor_btn_amd"] {{
     background:transparent; color:{ts}; border:1px solid {cb};
-    border-radius:8px; min-height:36px; font-weight:500;
+    border-radius:{p["gpu_btn_radius"]}px; min-height:36px; font-weight:500;
 }}
 QPushButton[objectName="vendor_btn_amd"]:hover {{ border-color:#ed1c24; color:#ed1c24; }}
 /* AMD  active */
 QPushButton[objectName="vendor_btn_amd_active"] {{
     background:#ed1c24; color:#FFFFFF; border:none;
-    border-radius:8px; min-height:36px; font-weight:700;
+    border-radius:{p["gpu_btn_radius"]}px; min-height:36px; font-weight:700;
 }}
 QPushButton[objectName="vendor_btn_amd_active"]:hover {{ background:#d01820; }}
 
 /* Intel  inactive */
 QPushButton[objectName="vendor_btn_intel"] {{
     background:transparent; color:{ts}; border:1px solid {cb};
-    border-radius:8px; min-height:36px; font-weight:500;
+    border-radius:{p["gpu_btn_radius"]}px; min-height:36px; font-weight:500;
 }}
 QPushButton[objectName="vendor_btn_intel"]:hover {{ border-color:#0071c5; color:#0071c5; }}
 /* Intel  active */
 QPushButton[objectName="vendor_btn_intel_active"] {{
     background:#0071c5; color:#FFFFFF; border:none;
-    border-radius:8px; min-height:36px; font-weight:700;
+    border-radius:{p["gpu_btn_radius"]}px; min-height:36px; font-weight:700;
 }}
 QPushButton[objectName="vendor_btn_intel_active"]:hover {{ background:#005fa3; }}
 
 /* None  inactive */
 QPushButton[objectName="vendor_btn_none"] {{
     background:transparent; color:{ts}; border:1px solid {cb};
-    border-radius:8px; min-height:36px; font-weight:500;
+    border-radius:{p["gpu_btn_radius"]}px; min-height:36px; font-weight:500;
 }}
 QPushButton[objectName="vendor_btn_none"]:hover {{ border-color:{hb}; color:{a}; }}
 /* None  active */
 QPushButton[objectName="vendor_btn_none_active"] {{
     background:{t["prog_bg"]}; color:{tp}; border:1px solid {cb};
-    border-radius:8px; min-height:36px; font-weight:700;
+    border-radius:{p["gpu_btn_radius"]}px; min-height:36px; font-weight:700;
 }}
 QPushButton[objectName="vendor_btn_none_active"]:hover {{ border-color:{hb}; }}
 
@@ -351,7 +417,7 @@ QFrame#gpu_link_card {{
 QPushButton#icon_link_button {{
     background: {bs};
     border: 1px solid {cb};
-    border-radius: 16px;
+    border-radius: {p["icon_btn_radius"]}px;
     min-width: 32px;
     min-height: 32px;
     padding: 0;
@@ -368,7 +434,7 @@ QPushButton#icon_link_button:pressed {{
 /* ══ Inputs ═══════════════════════════════════════════════════════ */
 QLineEdit {{
     background:transparent; color:{tp}; border:1.5px solid {cb};
-    border-radius:7px; padding:5px 10px;
+    border-radius:{p["input_radius"]}px; padding:5px 10px;
     font-size:13px; font-weight:500; min-height:32px;
     selection-background-color:{a}; selection-color:#FFFFFF;
 }}
@@ -378,9 +444,9 @@ QLineEdit:disabled  {{ color:{tm}; border-color:{cb}; }}
 
 QTextEdit {{
     background:transparent; color:{tp}; border:1px solid {cb};
-    border-radius:8px; padding:6px 8px;
+    border-radius:{p["input_radius"] + 1}px; padding:6px 8px;
     font-size:12px; font-weight:500;
-    font-family:"Consolas","Cascadia Code","Courier New",monospace;
+    font-family:{p["mono_font"]};
     min-height:60px;
     selection-background-color:{a}; selection-color:#FFFFFF;
 }}
@@ -389,7 +455,7 @@ QTextEdit:disabled {{ color:{tm}; }}
 
 QComboBox {{
     background:{bs}; color:{tp}; border:1.5px solid {cb};
-    border-radius:7px; padding:5px 10px;
+    border-radius:{p["input_radius"]}px; padding:5px 10px;
     font-size:13px; font-weight:500; min-height:32px; min-width:110px;
 }}
 QComboBox:focus, QComboBox:on {{ border-color:{cf}; }}
@@ -402,7 +468,7 @@ QComboBox::down-arrow {{
 }}
 QComboBox QAbstractItemView {{
     background:{t["pop_bg"]}; color:{t["pop_txt"]};
-    border:1px solid {cb}; border-radius:8px; padding:4px;
+    border:1px solid {cb}; border-radius:{p["input_radius"] + 1}px; padding:4px;
     outline:none; selection-background-color:{t["pop_sel"]}; selection-color:{a};
 }}
 
@@ -455,11 +521,11 @@ QCheckBox#command_line_switch::indicator:checked:hover {{
 /* ══ List ═════════════════════════════════════════════════════════ */
 QListWidget {{
     background:transparent; color:{tp}; border:1.5px solid {cb};
-    border-radius:10px; padding:4px; outline:none;
+    border-radius:{p["list_radius"]}px; padding:4px; outline:none;
     font-size:12px; font-weight:500; min-height:60px;
 }}
 QListWidget::item {{
-    padding:6px 10px; border-radius:6px; margin:1px 2px;
+    padding:6px 10px; border-radius:{p["item_radius"]}px; margin:1px 2px;
     background:transparent; min-height:20px;
 }}
 QListWidget::item:hover    {{ background:{t["list_h"]}; }}
@@ -467,14 +533,14 @@ QListWidget::item:selected {{ background:{t["list_sel"]}; color:{a}; }}
 
 /* ══ Progress ═════════════════════════════════════════════════════ */
 QProgressBar {{
-    background:{t["prog_bg"]}; border:none; border-radius:6px;
+    background:{t["prog_bg"]}; border:none; border-radius:{p["progress_radius"]}px;
     min-height:10px; max-height:12px;
     text-align:center; font-size:11px; font-weight:600; color:transparent;
 }}
 QProgressBar::chunk {{
     background:qlineargradient(x1:0,y1:0,x2:1,y2:0,
         stop:0 {a}, stop:0.5 {ah}, stop:1 {a});
-    border-radius:6px;
+    border-radius:{p["progress_radius"]}px;
 }}
 
 /* ══ Labels ═══════════════════════════════════════════════════════ */
@@ -506,7 +572,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background:t
 QStatusBar {{
     background:{t["status_bg"]}; color:{ts};
     border-top:1px solid {t["divider"]};
-    font-size:12px; font-weight:500; padding:3px 14px;
+    font-size:12px; font-weight:500; padding:{p["status_pad"]};
 }}
 
 /* ══ Dividers ═════════════════════════════════════════════════════ */
@@ -518,7 +584,7 @@ QFrame[frameShape="4"], QFrame[frameShape="5"] {{
 /* ══ Tooltip / MessageBox ════════════════════════════════════════ */
 QToolTip {{
     background:{t["pop_bg"]}; color:{t["pop_txt"]};
-    border:1px solid {cb}; border-radius:6px;
+    border:1px solid {cb}; border-radius:{p["tooltip_radius"]}px;
     padding:5px 9px; font-size:12px;
 }}
 QMessageBox        {{ background:{t["pop_bg"]}; }}

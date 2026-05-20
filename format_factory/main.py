@@ -1,4 +1,4 @@
-﻿# format_factory/main.py
+# format_factory/main.py
 import sys
 import os
 import json
@@ -1422,7 +1422,13 @@ class MainWindow(QMainWindow):
         actual_mode = self._effective_theme_name()
         theme  = LIGHT_THEME if actual_mode == "light" else DARK_THEME
         has_bg = bool(self._bg_path and os.path.isfile(self._bg_path))
-        ss     = build_stylesheet(theme, actual_mode, has_bg, self._bg_colors)
+        ss     = build_stylesheet(
+            theme,
+            actual_mode,
+            has_bg,
+            self._bg_colors,
+            platform_name=platform.system(),
+        )
         self.setStyleSheet(ss)
         self._bg.set_dark(actual_mode == "dark")
         self._bg.set_mask_color(actual_mode == "dark")
