@@ -191,9 +191,9 @@ _BTN_W_SM  = 80
 _BTN_W_PRI = 140
 
 # 分离：视频输出格式（仅视频流，无音频）
-VIDEO_ONLY_FMTS = ["mp4", "mkv", "avi", "mov", "webm", "flv"]
+VIDEO_ONLY_FMTS = ["mp4", "m4s", "mkv", "avi", "mov", "webm", "flv"]
 # 分离：音频输出格式
-AUDIO_ONLY_FMTS = ["m4a", "mp3", "aac", "wav", "flac", "ogg", "opus"]
+AUDIO_ONLY_FMTS = ["m4a", "m4s", "mp3", "aac", "wav", "flac", "ogg", "opus"]
 # 合成：输出容器格式
 MERGE_FMTS      = ["mp4", "mkv", "avi", "mov", "webm", "flv"]
 
@@ -204,6 +204,8 @@ _AUDIO_FILTER = "音频文件 (*.mp3 *.aac *.wav *.flac *.ogg *.opus *.m4a *.ac3
 # 分离：提取视频流默认参数（复制流，零损耗）
 _SPLIT_VIDEO_ARGS: dict[str, list] = {
     "mp4":  ["-c:v", "copy", "-an"],
+    "m4s":  ["-c:v", "copy", "-an", "-f", "mp4",
+             "-movflags", "+frag_keyframe+empty_moov+default_base_moof"],
     "mkv":  ["-c:v", "copy", "-an"],
     "avi":  ["-c:v", "copy", "-an"],
     "mov":  ["-c:v", "copy", "-an"],
@@ -216,6 +218,8 @@ _SPLIT_AUDIO_ARGS: dict[str, list] = {
     "mp3":  ["-vn", "-c:a", "libmp3lame", "-b:a", "192k"],
     "aac":  ["-vn", "-c:a", "copy"],
     "m4a":  ["-vn", "-c:a", "copy"],
+    "m4s":  ["-vn", "-c:a", "aac", "-b:a", "192k", "-f", "mp4",
+             "-movflags", "+frag_keyframe+empty_moov+default_base_moof"],
     "wav":  ["-vn", "-c:a", "pcm_s16le"],
     "flac": ["-vn", "-c:a", "flac", "-compression_level", "5"],
     "ogg":  ["-vn", "-c:a", "libvorbis", "-q:a", "4"],
@@ -498,7 +502,7 @@ class SplitTab(QWidget, _LogMixin, _FFmpegPromptMixin):
         self._audio_fmt_combo = QComboBox()
         self._audio_fmt_combo.setFixedHeight(_BTN_H)
         self._audio_fmt_combo.addItems(AUDIO_ONLY_FMTS)
-        self._audio_fmt_combo.setCurrentText("m4a")
+        self._audio_fmt_combo.setCurrentText("m4s")
         self._audio_fmt_combo.setMinimumWidth(120)
         self._audio_fmt_row.addWidget(self._audio_fmt_combo)
         self._audio_fmt_row.addStretch()
@@ -511,6 +515,7 @@ class SplitTab(QWidget, _LogMixin, _FFmpegPromptMixin):
         self._video_fmt_combo = QComboBox()
         self._video_fmt_combo.setFixedHeight(_BTN_H)
         self._video_fmt_combo.addItems(VIDEO_ONLY_FMTS)
+        self._video_fmt_combo.setCurrentText("m4s")
         self._video_fmt_combo.setMinimumWidth(120)
         self._video_fmt_row.addWidget(self._video_fmt_combo)
         self._video_fmt_row.addStretch()

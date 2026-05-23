@@ -120,7 +120,7 @@ def has_ffmpeg() -> bool:
     return get_ffmpeg_path(required=False) is not None
 
 
-VIDEO_FORMATS = ["mp4", "m4a", "mkv", "avi", "mov", "webm", "flv", "gif", "m3u8"]
+VIDEO_FORMATS = ["mp4", "mkv", "avi", "mov", "webm", "flv", "gif", "m3u8"]
 AUDIO_FORMATS = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"]
 IMAGE_FORMATS = ["jpg", "png", "webp", "bmp", "tiff", "ico"]
 M3U8_OUTPUT_FORMATS = ["mp4", "mkv", "avi", "mov", "webm"]

@@ -51,7 +51,8 @@ GPU_ENCODERS = {
 }
 
 PROJECT_URL = "https://github.com/xiaofa520/Formix"
-PROJECT_LINK_SVG = """<svg t="1778631030424" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="2541" width="200" height="200"><path d="M950.930286 512q0 143.433143-83.748571 257.974857t-216.283429 158.573714q-15.433143 2.852571-22.601143-4.022857t-7.168-17.115429l0-120.539429q0-55.442286-29.696-81.115429 32.548571-3.437714 58.587429-10.313143t53.686857-22.308571 46.299429-38.034286 30.281143-59.977143 11.702857-86.016q0-69.12-45.129143-117.686857 21.138286-52.004571-4.534857-116.589714-16.018286-5.12-46.299429 6.290286t-52.589714 25.161143l-21.723429 13.677714q-53.174857-14.848-109.714286-14.848t-109.714286 14.848q-9.142857-6.290286-24.283429-15.433143t-47.689143-22.016-49.152-7.68q-25.161143 64.585143-4.022857 116.589714-45.129143 48.566857-45.129143 117.686857 0 48.566857 11.702857 85.723429t29.988571 59.977143 46.006857 38.253714 53.686857 22.308571 58.587429 10.313143q-22.820571 20.553143-28.013714 58.88-11.995429 5.705143-25.746286 8.557714t-32.548571 2.852571-37.449143-12.288-31.744-35.693714q-10.825143-18.285714-27.721143-29.696t-28.306286-13.677714l-11.410286-1.682286q-11.995429 0-16.603429 2.56t-2.852571 6.582857 5.12 7.972571 7.460571 6.875429l4.022857 2.852571q12.580571 5.705143 24.868571 21.723429t17.993143 29.110857l5.705143 13.165714q7.460571 21.723429 25.161143 35.108571t38.253714 17.115429 39.716571 4.022857 31.744-1.974857l13.165714-2.267429q0 21.723429 0.292571 50.834286t0.292571 30.866286q0 10.313143-7.460571 17.115429t-22.820571 4.022857q-132.534857-44.032-216.283429-158.573714t-83.748571-257.974857q0-119.442286 58.88-220.306286t159.744-159.744 220.306286-58.88 220.306286 58.88 159.744 159.744 58.88 220.306286z" fill="#444444" p-id="2542"></path></svg>"""
+PROJECT_LINK_SVG_LIGHT = """<svg t="1778631030424" class="icon" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg" p-id="2541" width="200" height="200"><path d="M950.930286 512q0 143.433143-83.748571 257.974857t-216.283429 158.573714q-15.433143 2.852571-22.601143-4.022857t-7.168-17.115429l0-120.539429q0-55.442286-29.696-81.115429 32.548571-3.437714 58.587429-10.313143t53.686857-22.308571 46.299429-38.034286 30.281143-59.977143 11.702857-86.016q0-69.12-45.129143-117.686857 21.138286-52.004571-4.534857-116.589714-16.018286-5.12-46.299429 6.290286t-52.589714 25.161143l-21.723429 13.677714q-53.174857-14.848-109.714286-14.848t-109.714286 14.848q-9.142857-6.290286-24.283429-15.433143t-47.689143-22.016-49.152-7.68q-25.161143 64.585143-4.022857 116.589714-45.129143 48.566857-45.129143 117.686857 0 48.566857 11.702857 85.723429t29.988571 59.977143 46.006857 38.253714 53.686857 22.308571 58.587429 10.313143q-22.820571 20.553143-28.013714 58.88-11.995429 5.705143-25.746286 8.557714t-32.548571 2.852571-37.449143-12.288-31.744-35.693714q-10.825143-18.285714-27.721143-29.696t-28.306286-13.677714l-11.410286-1.682286q-11.995429 0-16.603429 2.56t-2.852571 6.582857 5.12 7.972571 7.460571 6.875429l4.022857 2.852571q12.580571 5.705143 24.868571 21.723429t17.993143 29.110857l5.705143 13.165714q7.460571 21.723429 25.161143 35.108571t38.253714 17.115429 39.716571 4.022857 31.744-1.974857l13.165714-2.267429q0 21.723429 0.292571 50.834286t0.292571 30.866286q0 10.313143-7.460571 17.115429t-22.820571 4.022857q-132.534857-44.032-216.283429-158.573714t-83.748571-257.974857q0-119.442286 58.88-220.306286t159.744-159.744 220.306286-58.88 220.306286 58.88 159.744 159.744 58.88 220.306286z" fill="#444444" p-id="2542"></path></svg>"""
+PROJECT_LINK_SVG_DARK = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="200" height="200"><path d="M64 512c0 195.2 124.8 361.6 300.8 422.4 22.4 6.4 19.2-9.6 19.2-22.4v-76.8c-134.4 16-140.8-73.6-150.4-89.6-19.2-32-60.8-38.4-48-54.4 32-16 64 3.2 99.2 57.6 25.6 38.4 76.8 32 105.6 25.6 6.4-22.4 19.2-44.8 35.2-60.8-144-22.4-201.6-108.8-201.6-211.2 0-48 16-96 48-131.2-22.4-60.8 0-115.2 3.2-121.6 57.6-6.4 118.4 41.6 124.8 44.8 32-9.6 70.4-12.8 112-12.8 41.6 0 80 6.4 112 12.8 12.8-9.6 67.2-48 121.6-44.8 3.2 6.4 25.6 57.6 6.4 118.4 32 38.4 48 83.2 48 131.2 0 102.4-57.6 188.8-201.6 214.4 22.4 22.4 38.4 54.4 38.4 92.8v112c0 9.6 0 19.2 16 19.2C832 876.8 960 710.4 960 512c0-246.4-201.6-448-448-448S64 265.6 64 512z" fill="#ffffff"/></svg>"""
 
 
 class SettingsPage(QWidget):
@@ -109,6 +110,8 @@ class SettingsPage(QWidget):
         self._is_dark = (actual_mode == "dark")
         self._refresh_theme_buttons()
         self._refresh_command_toggle()
+        if hasattr(self, "_project_link_btn"):
+            self._project_link_btn.setIcon(self._make_project_link_icon(self._is_dark))
 
     def set_language(self, language: str):
         self._language = language or LANG_AUTO
@@ -179,19 +182,19 @@ class SettingsPage(QWidget):
         lay.addWidget(self._theme_row_lbl)
         t_row = QHBoxLayout(); t_row.setSpacing(6); t_row.setContentsMargins(0,0,0,0)
 
-        self.light_btn = QPushButton("亮色")
+        self.light_btn = QPushButton("浅色模式")
         self.light_btn.setObjectName("toggle_light")
         self.light_btn.setFixedHeight(_BTN_H)
         self.light_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.light_btn.clicked.connect(lambda: self._set_theme("light"))
 
-        self.dark_btn = QPushButton("深色")
+        self.dark_btn = QPushButton("深色模式")
         self.dark_btn.setObjectName("toggle_dark")
         self.dark_btn.setFixedHeight(_BTN_H)
         self.dark_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.dark_btn.clicked.connect(lambda: self._set_theme("dark"))
 
-        self.auto_btn = QPushButton("自动")
+        self.auto_btn = QPushButton("跟随系统")
         self.auto_btn.setObjectName("toggle_auto")
         self.auto_btn.setFixedHeight(_BTN_H)
         self.auto_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -471,7 +474,7 @@ class SettingsPage(QWidget):
         self._project_link_btn.setToolTip(PROJECT_URL)
         self._project_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._project_link_btn.setFixedSize(32, 32)
-        self._project_link_btn.setIcon(self._make_project_link_icon())
+        self._project_link_btn.setIcon(self._make_project_link_icon(self._is_dark))
         self._project_link_btn.setIconSize(QSize(18, 18))
         self._project_link_btn.clicked.connect(lambda: webbrowser.open(PROJECT_URL))
         project_row.addWidget(self._project_link_hint)
@@ -497,9 +500,10 @@ class SettingsPage(QWidget):
         return btn
 
     @staticmethod
-    def _make_project_link_icon() -> QIcon:
+    def _make_project_link_icon(is_dark: bool = False) -> QIcon:
+        svg = PROJECT_LINK_SVG_DARK if is_dark else PROJECT_LINK_SVG_LIGHT
         if QSvgRenderer is not None:
-            renderer = QSvgRenderer(bytearray(PROJECT_LINK_SVG, "utf-8"))
+            renderer = QSvgRenderer(bytearray(svg, "utf-8"))
             if renderer.isValid():
                 pixmap = QPixmap(64, 64)
                 pixmap.fill(Qt.GlobalColor.transparent)
