@@ -29,6 +29,7 @@ on:
 
 env:
   APP_NAME: Formix
+  APP_VERSION: '1.2.1'
   PYTHON_VERSION: '3.11'
 
 jobs:
@@ -63,9 +64,7 @@ jobs:
         shell: powershell
         run: |
           if (Test-Path "dist\Formix.exe") {
-            Compress-Archive -Path "dist\Formix.exe" -DestinationPath "dist\${{ env.APP_NAME }}-Windows.zip" -Force
-          } elseif (Test-Path "dist\Formix") {
-            Compress-Archive -Path "dist\Formix" -DestinationPath "dist\${{ env.APP_NAME }}-Windows.zip" -Force
+            Compress-Archive -Path "dist\Formix.exe" -DestinationPath "dist\${{ env.APP_NAME }}-Windows-${{ env.APP_VERSION }}.zip" -Force
           }
           
       - name: Upload Windows artifact
@@ -102,23 +101,17 @@ jobs:
           rm -rf build dist
           pyinstaller --clean formix.spec
           
-      - name: Package artifacts
+      - name: Create DMG
         run: |
-          cd dist
-          if [ -d "Formix.app" ]; then
-            zip -r ../${{ env.APP_NAME }}-macOS.zip Formix.app
-          elif [ -f "Formix" ]; then
-            zip -r ../${{ env.APP_NAME }}-macOS.zip Formix
-          elif [ -d "Formix" ]; then
-            zip -r ../${{ env.APP_NAME }}-macOS.zip Formix
+          if [ -d "dist/Formix.app" ]; then
+            hdiutil create -volname "Formix" -srcfolder "dist/Formix.app" -ov -format UDZO "dist/Formix-macOS-${{ env.APP_VERSION }}.dmg"
           fi
-          cd ..
           
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-macOS
-          path: ${{ env.APP_NAME }}-macOS.zip
+          path: dist/*.dmg
           retention-days: 30
 
   build-linux:
@@ -145,7 +138,10 @@ jobs:
             libxkbcommon-x11-0 \
             libegl1 \
             libopengl0 \
-            libxkbcommon0
+            libxkbcommon0 \
+            fakeroot \
+            dpkg-dev \
+            imagemagick
           
       - name: Install Python dependencies
         run: |
@@ -158,23 +154,26 @@ jobs:
           rm -rf build dist
           pyinstaller --clean formix.spec
           
-      - name: Package artifacts
+      - name: Package DEB
         run: |
-          cd dist
-          if [ -f "Formix" ]; then
-            chmod +x Formix
-            zip -r ../${{ env.APP_NAME }}-Linux.zip Formix
-          elif [ -d "Formix" ]; then
-            chmod +x Formix/Formix
-            zip -r ../${{ env.APP_NAME }}-Linux.zip Formix
+          chmod +x package-deb.sh
+          ./package-deb.sh
+          
+      - name: Package artifacts (tar.gz fallback)
+        run: |
+          if [ -d "dist/Formix" ]; then
+            cd dist
+            tar -czf ../Formix-Linux-${{ env.APP_VERSION }}.tar.gz Formix
+            cd ..
           fi
-          cd ..
           
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-Linux
-          path: ${{ env.APP_NAME }}-Linux.zip
+          path: |
+            build/deb/*.deb
+            *.tar.gz
           retention-days: 30
 
   create-release:
@@ -198,13 +197,16 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
-          cp artifacts/*/*.zip release/
+          cp artifacts/Formix-Windows/*.zip release/ || true
+          cp artifacts/Formix-macOS/*.dmg release/ || true
+          cp artifacts/Formix-Linux/*.deb release/ || true
+          cp artifacts/Formix-Linux/*.tar.gz release/ || true
           
       - name: Create Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          files: release/*.zip
+          files: release/*
           draft: false
           prerelease: false
           generate_release_notes: true
