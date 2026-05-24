@@ -87,7 +87,6 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
-        icon='format_factory/assets/logo.ico' if sys.platform == 'darwin' else None,
     )
 
     coll = COLLECT(
@@ -106,7 +105,6 @@ else:
         app = BUNDLE(
             coll,
             name=f'{app_name}.app',
-            icon='format_factory/assets/logo.ico',
             bundle_identifier='com.formix.app',
             info_plist={
                 'CFBundleName': app_name,
