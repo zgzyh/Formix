@@ -145,7 +145,6 @@ jobs:
             libxkbcommon-x11-0 \
             libegl1 \
             libopengl0 \
-            libegl1-mesa \
             libxkbcommon0
           
       - name: Install Python dependencies
