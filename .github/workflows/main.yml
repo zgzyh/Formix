@@ -1,5 +1,8 @@
 name: Build Formix
 
+permissions:
+  contents: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -29,7 +32,7 @@ on:
 
 env:
   APP_NAME: Formix
-  APP_VERSION: '1.2.1'
+  APP_VERSION: '1.2.2'
   PYTHON_VERSION: '3.11'
 
 jobs:

@@ -6,7 +6,7 @@ import os
 block_cipher = None
 
 app_name = 'Formix'
-app_version = '1.2.1'
+app_version = '1.2.2'
 
 project_root = os.path.dirname(os.path.abspath(SPEC))
 format_factory_path = os.path.join(project_root, 'format_factory')
